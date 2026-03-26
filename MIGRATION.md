@@ -27,6 +27,11 @@ Masukkan key itu ke `.env.server` sebagai `N8N_ENCRYPTION_KEY`.
 
 ## 2. Jalankan stack baru
 
+Untuk testing paralel tanpa mematikan instance lama, gunakan salah satu:
+
+- Rekomendasi: subdomain sementara, mis. `n8n-new.pandi.id`, dengan `N8N_PROTOCOL=https`
+- Alternatif cepat: port sementara, mis. `5680`, dengan `N8N_PROTOCOL=http`
+
 ```bash
 cp .env.server.example .env.server
 nano .env.server
