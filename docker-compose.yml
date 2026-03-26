@@ -1,0 +1,61 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  clip-api:
+    build:
+      context: ./services/clip-factory
+    command: python -m uvicorn clip_factory.api:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CLIP_FACTORY_DATA_DIR: /app/data
+      CLIP_FACTORY_OUTPUT_DIR: /app/outputs
+      CLIP_FACTORY_REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+    depends_on:
+      - redis
+    ports:
+      - "8000:8000"
+
+  clip-worker:
+    build:
+      context: ./services/clip-factory
+    command: python -m clip_factory.worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CLIP_FACTORY_DATA_DIR: /app/data
+      CLIP_FACTORY_OUTPUT_DIR: /app/outputs
+      CLIP_FACTORY_REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+    depends_on:
+      - redis
+
+  n8n:
+    image: n8nio/n8n:1.82.1
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/files/workflows
+    depends_on:
+      - clip-api
+
+volumes:
+  n8n_data:
+

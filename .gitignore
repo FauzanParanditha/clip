@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+data/
+outputs/
+services/clip-factory/.pytest_cache/
+services/clip-factory/.mypy_cache/
+n8n/.n8n/
+

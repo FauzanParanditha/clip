@@ -1,0 +1,296 @@
+{
+  "name": "AI Clip Factory",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-clip-factory",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "Webhook",
+      "name": "Webhook Intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1120,
+        260
+      ],
+      "webhookId": "ai-clip-factory"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const body = items[0]?.json?.body ?? items[0]?.json ?? {};\nif (!body.source_url) {\n  throw new Error('source_url is required');\n}\nreturn [{\n  json: {\n    source_url: body.source_url,\n    content_type: body.content_type ?? 'podcast',\n    platform_targets: ['youtube_shorts', 'tiktok'],\n    language_mode: 'same_as_source',\n    style: 'clean_editorial',\n    clip_count_target: Number(body.clip_count_target ?? 8),\n    auto_publish: false\n  }\n}];"
+      },
+      "id": "Normalize",
+      "name": "Normalize Intake",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -900,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://clip-api:8000/v1/jobs",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json}}",
+        "options": {}
+      },
+      "id": "CreateJob",
+      "name": "Create Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -680,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://clip-api:8000/v1/jobs/{{$json[\"job_id\"]}}/ingest",
+        "options": {}
+      },
+      "id": "Ingest",
+      "name": "Ingest Source",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -460,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://clip-api:8000/v1/jobs/{{$json[\"job_id\"]}}/transcript",
+        "options": {}
+      },
+      "id": "Transcript",
+      "name": "Generate Transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -240,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://clip-api:8000/v1/jobs/{{$json[\"job_id\"]}}/rank",
+        "options": {}
+      },
+      "id": "Rank",
+      "name": "Rank Segments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -20,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://clip-api:8000/v1/jobs/{{$json[\"job_id\"]}}/select",
+        "options": {}
+      },
+      "id": "Select",
+      "name": "Select Clips",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        200,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const source = items[0]?.json ?? {};\nconst jobId = source.job_id;\nconst clipIds = source.selected_clip_ids ?? [];\nreturn clipIds.map((clipId) => ({ json: { job_id: jobId, clip_id: clipId } }));"
+      },
+      "id": "ExpandClips",
+      "name": "Expand Clip IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://clip-api:8000/v1/jobs/{{$json[\"job_id\"]}}/clips/{{$json[\"clip_id\"]}}/enqueue-render",
+        "options": {}
+      },
+      "id": "EnqueueRender",
+      "name": "Enqueue Render",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        650,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const first = items[0]?.json ?? {};\nreturn [{ json: { job_id: first.job_id, queued_clips: items.map((item) => item.json.clip_id) } }];"
+      },
+      "id": "Summarize",
+      "name": "Summarize Queue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://clip-api:8000/v1/jobs/{{$json[\"job_id\"]}}/manifest",
+        "options": {}
+      },
+      "id": "Manifest",
+      "name": "Fetch Manifest Snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1110,
+        260
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Intake": {
+      "main": [
+        [
+          {
+            "node": "Normalize Intake",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Intake": {
+      "main": [
+        [
+          {
+            "node": "Create Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Job": {
+      "main": [
+        [
+          {
+            "node": "Ingest Source",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ingest Source": {
+      "main": [
+        [
+          {
+            "node": "Generate Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Transcript": {
+      "main": [
+        [
+          {
+            "node": "Rank Segments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rank Segments": {
+      "main": [
+        [
+          {
+            "node": "Select Clips",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Clips": {
+      "main": [
+        [
+          {
+            "node": "Expand Clip IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expand Clip IDs": {
+      "main": [
+        [
+          {
+            "node": "Enqueue Render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enqueue Render": {
+      "main": [
+        [
+          {
+            "node": "Summarize Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Queue": {
+      "main": [
+        [
+          {
+            "node": "Fetch Manifest Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "versionId": "3fd57733-03cb-4ccd-b6bc-clipfactory",
+  "triggerCount": 0,
+  "updatedAt": "2026-03-26T00:00:00.000Z"
+}

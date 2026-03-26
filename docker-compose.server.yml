@@ -1,0 +1,145 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:1.82.1
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clip-api:
+        condition: service_healthy
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      N8N_PROXY_HOPS: "1"
+      NODE_ENV: production
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: https
+      N8N_HOST: ${N8N_HOST}
+      WEBHOOK_URL: ${WEBHOOK_URL}
+      N8N_EDITOR_BASE_URL: ${N8N_EDITOR_BASE_URL}
+      N8N_TRUSTED_PROXIES: ${N8N_TRUSTED_PROXIES}
+      TZ: ${TZ:-Asia/Jakarta}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-Asia/Jakarta}
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD}
+      N8N_ENABLE_COMMUNITY_NODES: "true"
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: "5432"
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/files/workflows
+      - ./local-files:/home/node/.n8n-files
+    networks:
+      - automation
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: ${TZ:-Asia/Jakarta}
+    volumes:
+      - n8n_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - automation
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - automation
+
+  clip-api:
+    build:
+      context: ./services/clip-factory
+    command: python -m uvicorn clip_factory.api:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      CLIP_FACTORY_DATA_DIR: /app/data
+      CLIP_FACTORY_OUTPUT_DIR: /app/outputs
+      CLIP_FACTORY_REDIS_URL: redis://redis:6379/0
+      CLIP_FACTORY_QUEUE_KEY: ${CLIP_FACTORY_QUEUE_KEY:-clip-factory:render}
+      CLIP_FACTORY_AI_SCORER_URL: ${CLIP_FACTORY_AI_SCORER_URL:-}
+      CLIP_FACTORY_AI_SCORER_BEARER_TOKEN: ${CLIP_FACTORY_AI_SCORER_BEARER_TOKEN:-}
+      CLIP_FACTORY_FALLBACK_CLIP_COUNT: ${CLIP_FACTORY_FALLBACK_CLIP_COUNT:-8}
+      CLIP_FACTORY_WHISPER_MODEL: ${CLIP_FACTORY_WHISPER_MODEL:-small}
+      CLIP_FACTORY_WHISPER_DEVICE: ${CLIP_FACTORY_WHISPER_DEVICE:-cpu}
+      CLIP_FACTORY_WHISPER_COMPUTE_TYPE: ${CLIP_FACTORY_WHISPER_COMPUTE_TYPE:-int8}
+      CLIP_FACTORY_FFMPEG_BINARY: ffmpeg
+      CLIP_FACTORY_YTDLP_BINARY: yt-dlp
+      CLIP_FACTORY_SUBTITLE_FONT: ${CLIP_FACTORY_SUBTITLE_FONT:-Arial}
+      TZ: ${TZ:-Asia/Jakarta}
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks:
+      - automation
+
+  clip-worker:
+    build:
+      context: ./services/clip-factory
+    command: python -m clip_factory.worker
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      clip-api:
+        condition: service_healthy
+    environment:
+      CLIP_FACTORY_DATA_DIR: /app/data
+      CLIP_FACTORY_OUTPUT_DIR: /app/outputs
+      CLIP_FACTORY_REDIS_URL: redis://redis:6379/0
+      CLIP_FACTORY_QUEUE_KEY: ${CLIP_FACTORY_QUEUE_KEY:-clip-factory:render}
+      CLIP_FACTORY_AI_SCORER_URL: ${CLIP_FACTORY_AI_SCORER_URL:-}
+      CLIP_FACTORY_AI_SCORER_BEARER_TOKEN: ${CLIP_FACTORY_AI_SCORER_BEARER_TOKEN:-}
+      CLIP_FACTORY_FALLBACK_CLIP_COUNT: ${CLIP_FACTORY_FALLBACK_CLIP_COUNT:-8}
+      CLIP_FACTORY_WHISPER_MODEL: ${CLIP_FACTORY_WHISPER_MODEL:-small}
+      CLIP_FACTORY_WHISPER_DEVICE: ${CLIP_FACTORY_WHISPER_DEVICE:-cpu}
+      CLIP_FACTORY_WHISPER_COMPUTE_TYPE: ${CLIP_FACTORY_WHISPER_COMPUTE_TYPE:-int8}
+      CLIP_FACTORY_FFMPEG_BINARY: ffmpeg
+      CLIP_FACTORY_YTDLP_BINARY: yt-dlp
+      CLIP_FACTORY_SUBTITLE_FONT: ${CLIP_FACTORY_SUBTITLE_FONT:-Arial}
+      TZ: ${TZ:-Asia/Jakarta}
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+    networks:
+      - automation
+
+networks:
+  automation:
+    driver: bridge
+
+volumes:
+  n8n_data:
+  n8n_pgdata:
+  redis_data:
