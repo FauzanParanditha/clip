@@ -2,6 +2,8 @@
 
 Greenfield pipeline untuk mengubah video publik berdurasi panjang menjadi banyak clip vertikal `9:16` siap upload. `n8n` berperan sebagai orchestrator, sementara service Python menangani ingest, transkripsi, ranking segmen, subtitle ASS, dan render queue per clip.
 
+Stack compose di repo ini sekarang mem-pin `n8n` ke `2.13.3`, yaitu `stable` terbaru per 26 Maret 2026 menurut release notes resmi n8n. Reponya sengaja tidak memakai tag `latest` agar upgrade tetap deterministik.
+
 ## Arsitektur
 
 - `n8n` menerima `source_url`, menjalankan step ingest/transcript/rank/select, lalu fan-out render per clip.
@@ -89,9 +91,17 @@ docker compose --env-file .env.server -f docker-compose.server.yml up --build -d
 Pada mode ini:
 
 - `n8n` memakai `Postgres`, bukan SQLite.
+- `n8n` memakai external task runners (`n8nio/runners`) agar kompatibel dan aman untuk `Code` node di `n8n 2.x`.
 - `clip-api`, `clip-worker`, dan `redis` berjalan di Docker network internal yang sama.
 - Workflow `n8n` tetap memanggil `http://clip-api:8000`, jadi `clip-api` tidak perlu diexpose ke publik.
 - Hanya `n8n` yang dibuka ke port host.
+
+## Catatan Upgrade ke n8n 2.x
+
+- `Code` node sekarang dijalankan lewat task runners. Repo ini sudah dikonfigurasi ke external mode.
+- Akses environment variable dari `Code` node diblok default di `2.x`. Repo ini set `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` untuk kompatibilitas legacy. Setelah audit workflow selesai, Anda bisa mengubahnya menjadi `true`.
+- `ExecuteCommand` dan `LocalFileTrigger` diblok default di `2.x`. Repo ini menyetel `NODES_EXCLUDE` eksplisit ke default aman. Jika ada workflow lama yang memang memerlukan node itu, ubah variabel tersebut dengan sadar.
+- Jika server lama Anda masih memiliki env `N8N_RELEASE_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")`, hapus env itu. n8n mengharapkan timestamp literal, bukan ekspresi shell.
 
 ## Keterbatasan V1
 
