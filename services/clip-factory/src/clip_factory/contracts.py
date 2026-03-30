@@ -185,6 +185,7 @@ class SegmentCandidate:
 
 @dataclass(slots=True)
 class ClipMetadata:
+    hook_text: str
     titles: list[str]
     caption: str
     hashtags: list[str]
@@ -194,6 +195,7 @@ class ClipMetadata:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "hook_text": self.hook_text,
             "titles": self.titles,
             "caption": self.caption,
             "hashtags": self.hashtags,
@@ -205,6 +207,7 @@ class ClipMetadata:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ClipMetadata":
         return cls(
+            hook_text=data.get("hook_text", ""),
             titles=list(data.get("titles", [])),
             caption=data.get("caption", ""),
             hashtags=list(data.get("hashtags", [])),
@@ -408,4 +411,3 @@ class JobState:
             review_needed=bool(data.get("review_needed", False)),
             last_error=data.get("last_error"),
         )
-

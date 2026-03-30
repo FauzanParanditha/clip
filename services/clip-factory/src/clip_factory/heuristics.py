@@ -348,6 +348,7 @@ def generate_clip_metadata(candidate: SegmentCandidate, source: SourceAsset) -> 
             deduped_hashtags.append(hashtag)
     caption = f"{hook}. Source: {source.title or source.source_url}"
     return ClipMetadata(
+        hook_text=hook[:90],
         titles=titles[:3],
         caption=caption[:220],
         hashtags=deduped_hashtags[:15],

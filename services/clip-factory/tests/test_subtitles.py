@@ -1,7 +1,7 @@
 import unittest
 
 from clip_factory.contracts import TranscriptWord
-from clip_factory.subtitles import render_ass
+from clip_factory.subtitles import SubtitleChunk, render_ass, retime_rewritten_chunks
 
 
 class SubtitleTests(unittest.TestCase):
@@ -32,7 +32,19 @@ class SubtitleTests(unittest.TestCase):
         rendered = render_ass(words, hook_text="", keywords=["policy"])
         self.assertIn(r"\N", rendered)
 
+    def test_retime_rewritten_chunks_preserves_chunk_window(self) -> None:
+        chunk = SubtitleChunk(
+            [
+                TranscriptWord("gua", 0, 220),
+                TranscriptWord("udah", 230, 420),
+                TranscriptWord("nyobain", 430, 780),
+            ]
+        )
+        rewritten = retime_rewritten_chunks([chunk], ["Gue udah coba"])
+        self.assertEqual([word.text for word in rewritten], ["Gue", "udah", "coba"])
+        self.assertEqual(rewritten[0].start_ms, 0)
+        self.assertEqual(rewritten[-1].end_ms, 780)
+
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -15,7 +15,7 @@ from .heuristics import build_candidate_segments, generate_clip_metadata, select
 from .ingest import run_ingest
 from .rendering import render_clip
 from .storage import JsonJobStore
-from .subtitles import render_ass
+from .subtitles import group_words, render_ass, retime_rewritten_chunks
 from .tracking import detect_subject_tracking
 from .transcribe import run_transcription
 
@@ -156,11 +156,21 @@ class ClipPipeline:
             if not clip_words:
                 raise RuntimeError("Selected segment has no transcript words")
 
+            subtitle_words = clip_words
+            if self.settings.llm_subtitle_cleanup_enabled and job.source:
+                subtitle_chunks = group_words(clip_words)
+                raw_chunk_texts = [" ".join(word.text for word in chunk.words) for chunk in subtitle_chunks[: self.settings.llm_subtitle_cleanup_max_chunks]]
+                rewritten_chunk_texts = self.ai_scorer.rewrite_subtitle_chunks(job, job.source, clip.segment, raw_chunk_texts)
+                if rewritten_chunk_texts and rewritten_chunk_texts != raw_chunk_texts:
+                    cleaned_words = retime_rewritten_chunks(subtitle_chunks[: len(rewritten_chunk_texts)], rewritten_chunk_texts)
+                    remaining_words = [word for chunk in subtitle_chunks[len(rewritten_chunk_texts):] for word in chunk.words]
+                    subtitle_words = cleaned_words + remaining_words
+
             artifact_dir = self.store.artifacts_dir(job_id)
             subtitle_path = artifact_dir / f"{clip_id}.ass"
             subtitle_text = render_ass(
-                clip_words,
-                hook_text=clip.segment.hook_text,
+                subtitle_words,
+                hook_text=(clip.metadata.hook_text if clip.metadata else clip.segment.hook_text),
                 keywords=(clip.metadata.highlight_keywords if clip.metadata else clip.segment.keywords),
                 font_name=self.settings.subtitle_font,
             )
@@ -182,7 +192,7 @@ class ClipPipeline:
                 subtitle_path=str(subtitle_path),
                 start_ms=clip.segment.start_ms,
                 end_ms=clip.segment.end_ms,
-                hook_text=clip.segment.hook_text,
+                hook_text=(clip.metadata.hook_text if clip.metadata else clip.segment.hook_text),
                 keywords=(clip.metadata.highlight_keywords if clip.metadata else clip.segment.keywords),
                 crop_mode="auto_reframe" if tracking_boxes else "contain",
                 tracking_boxes=tracking_boxes,
@@ -225,14 +235,15 @@ class ClipPipeline:
                     "start_ms": clip.segment.start_ms,
                     "end_ms": clip.segment.end_ms,
                     "score": clip.segment.score,
-                    "reason": clip.segment.reason,
-                    "hook_text": clip.segment.hook_text,
-                    "keywords": clip.segment.keywords,
+                    "reason": clip.metadata.selection_reason if clip.metadata else clip.segment.reason,
+                    "hook_text": clip.metadata.hook_text if clip.metadata else clip.segment.hook_text,
+                    "keywords": clip.metadata.highlight_keywords if clip.metadata else clip.segment.keywords,
                     "output_path": clip.output_path,
                     "subtitle_path": clip.subtitle_path,
                     "titles": clip.metadata.titles if clip.metadata else [],
                     "caption": clip.metadata.caption if clip.metadata else "",
                     "hashtags": clip.metadata.hashtags if clip.metadata else [],
+                    "highlight_keywords": clip.metadata.highlight_keywords if clip.metadata else clip.segment.keywords,
                     "source_timestamp_label": clip.metadata.source_timestamp_label if clip.metadata else "",
                 }
                 for clip in clips

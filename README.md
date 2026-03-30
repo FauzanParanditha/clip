@@ -92,6 +92,7 @@ Repo ini sekarang mendukung mode hybrid bawaan:
   - re-score kandidat segmen terbaik
   - rewrite `hook_text`, `reason`, dan `keywords`
   - rewrite metadata clip terpilih (`titles`, `caption`, `hashtags`, `highlight_keywords`)
+  - optional cleanup subtitle per clip agar hasil ASR lebih dekat ke audio asli
 - skor final kandidat adalah blend antara heuristic lokal dan skor LLM, jadi pipeline tetap stabil walau model sesekali gagal atau memberi jawaban aneh
 
 Env yang dipakai:
@@ -107,6 +108,8 @@ CLIP_FACTORY_GEMINI_API_KEY=
 CLIP_FACTORY_GEMINI_MODEL=gemini-2.5-flash
 CLIP_FACTORY_GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
 CLIP_FACTORY_GEMINI_TIMEOUT_SECONDS=60
+CLIP_FACTORY_LLM_SUBTITLE_CLEANUP=false
+CLIP_FACTORY_LLM_SUBTITLE_CLEANUP_MAX_CHUNKS=16
 ```
 
 Nilai `CLIP_FACTORY_LLM_PROVIDER`:
@@ -120,6 +123,13 @@ Jika `CLIP_FACTORY_AI_SCORER_URL` dan LLM key sama-sama diisi, alurnya menjadi:
 1. heuristic lokal membuat kandidat
 2. external scorer opsional memperkaya skor kandidat
 3. provider LLM melakukan re-score akhir dan rewrite metadata clip
+
+Jika ingin subtitle bawah ikut dibersihkan oleh LLM agar lebih dekat ke audio:
+
+- set `CLIP_FACTORY_LLM_SUBTITLE_CLEANUP=true`
+- biarkan `CLIP_FACTORY_LLM_SUBTITLE_CLEANUP_MAX_CHUNKS=16` sebagai default awal
+
+Mode ini membersihkan salah dengar ASR, kata yang patah, dan phrasing yang aneh, tetapi tetap mempertahankan bahasa dan makna ucapan asli.
 
 ## Deploy ke Self-Hosted n8n
 

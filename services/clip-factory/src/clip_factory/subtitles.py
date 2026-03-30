@@ -57,6 +57,36 @@ def group_words(words: list[TranscriptWord], max_words: int = 8, max_gap_ms: int
     return chunks
 
 
+def retime_rewritten_chunks(chunks: list[SubtitleChunk], rewritten_texts: list[str]) -> list[TranscriptWord]:
+    rewritten_words: list[TranscriptWord] = []
+    for index, chunk in enumerate(chunks):
+        rewritten_text = rewritten_texts[index] if index < len(rewritten_texts) else ""
+        tokens = [token for token in rewritten_text.split() if token]
+        if not tokens:
+            rewritten_words.extend(chunk.words)
+            continue
+
+        chunk_start = chunk.start_ms
+        chunk_end = max(chunk.end_ms, chunk_start + len(tokens))
+        chunk_duration = max(1, chunk_end - chunk_start)
+        average_confidence = sum(word.confidence for word in chunk.words) / max(1, len(chunk.words))
+
+        for token_index, token in enumerate(tokens):
+            start_ms = chunk_start + (chunk_duration * token_index) // len(tokens)
+            end_ms = chunk_start + (chunk_duration * (token_index + 1)) // len(tokens)
+            if token_index == len(tokens) - 1:
+                end_ms = chunk_end
+            rewritten_words.append(
+                TranscriptWord(
+                    text=token,
+                    start_ms=start_ms,
+                    end_ms=max(start_ms + 1, end_ms),
+                    confidence=average_confidence,
+                )
+            )
+    return rewritten_words
+
+
 def _soft_highlight(text: str) -> str:
     return f"{{\\c&H90F5FF&}}{text}{{\\c&HFFFFFF&}}"
 
@@ -126,4 +156,3 @@ def render_ass(words: list[TranscriptWord], hook_text: str, keywords: list[str],
             )
 
     return "\n".join(lines) + "\n"
-

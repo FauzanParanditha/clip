@@ -47,6 +47,8 @@ def build_settings() -> Settings:
             gemini_model="gemini-2.5-flash",
             gemini_base_url="https://generativelanguage.googleapis.com/v1beta",
             gemini_timeout_seconds=60,
+            llm_subtitle_cleanup_enabled=True,
+            llm_subtitle_cleanup_max_chunks=16,
             fallback_clip_count=8,
             whisper_model="tiny",
             whisper_device="cpu",
@@ -96,6 +98,7 @@ class SharedLLMHybridScorerAssertions:
             text="Ini segmen penting untuk testing metadata rewrite.",
         )
         fallback = ClipMetadata(
+            hook_text="Fallback hook",
             titles=["Fallback 1", "Fallback 2", "Fallback 3"],
             caption="Fallback caption",
             hashtags=["#fallback"],
@@ -105,10 +108,40 @@ class SharedLLMHybridScorerAssertions:
         )
 
         result = scorer.enrich_clip_metadata(job, source, {"clip_01": (segment, fallback), "clip_02": (segment, fallback)})
+        self.assertEqual(result["clip_01"].hook_text, "Hook AI yang lebih nendang")
         self.assertEqual(result["clip_01"].titles[0], "Judul AI 1")
         self.assertEqual(result["clip_01"].caption, "Caption AI yang lebih natural")
         self.assertIn("#ai", result["clip_01"].hashtags)
+        self.assertEqual(result["clip_02"].hook_text, "Fallback hook")
         self.assertEqual(result["clip_02"].titles[0], "Fallback 1")
+
+    def assert_subtitle_cleanup(self, scorer) -> None:
+        job = JobState(job_id="job_1", input=IntakeRequest(source_url="https://example.com"))
+        source = SourceAsset(source_url="https://example.com", title="Video sumber", language="id")
+        segment = SegmentCandidate(
+            segment_id="seg_1",
+            start_ms=0,
+            end_ms=30000,
+            score=80.0,
+            reason="heuristic",
+            hook_text="Hook lama",
+            keywords=["lama"],
+            confidence=0.9,
+            text="Gua udah nyobain tool ini dan hasilnya jauh lebih stabil buat bikin aplikasi.",
+        )
+        chunks = [
+            "gua udah nyobain tul ini",
+            "dan hasilnya jauh lebih setabil",
+        ]
+
+        result = scorer.rewrite_subtitle_chunks(job, source, segment, chunks)
+        self.assertEqual(
+            result,
+            [
+                "Gue udah nyobain tool ini",
+                "dan hasilnya jauh lebih stabil",
+            ],
+        )
 
 
 class OpenAIHybridScorerTests(unittest.TestCase, SharedLLMHybridScorerAssertions):
@@ -161,6 +194,7 @@ class OpenAIHybridScorerTests(unittest.TestCase, SharedLLMHybridScorerAssertions
                 "clips": [
                     {
                         "clip_id": "clip_01",
+                        "hook_text": "Hook AI yang lebih nendang",
                         "titles": ["Judul AI 1", "Judul AI 2", "Judul AI 3"],
                         "caption": "Caption AI yang lebih natural",
                         "hashtags": ["#ai", "#workflow", "#shorts"],
@@ -171,6 +205,18 @@ class OpenAIHybridScorerTests(unittest.TestCase, SharedLLMHybridScorerAssertions
             },
         )
         self.assert_metadata_enrichment(scorer)
+
+    def test_rewrite_subtitle_chunks_cleans_asr_output(self) -> None:
+        scorer = TestableOpenAIHybridScorer(
+            build_settings(),
+            {
+                "subtitle_chunks": [
+                    {"chunk_id": "chunk_01", "text": "Gue udah nyobain tool ini"},
+                    {"chunk_id": "chunk_02", "text": "dan hasilnya jauh lebih stabil"},
+                ]
+            },
+        )
+        self.assert_subtitle_cleanup(scorer)
 
 
 class GeminiHybridScorerTests(unittest.TestCase, SharedLLMHybridScorerAssertions):
@@ -202,6 +248,7 @@ class GeminiHybridScorerTests(unittest.TestCase, SharedLLMHybridScorerAssertions
                 "clips": [
                     {
                         "clip_id": "clip_01",
+                        "hook_text": "Hook AI yang lebih nendang",
                         "titles": ["Judul AI 1", "Judul AI 2", "Judul AI 3"],
                         "caption": "Caption AI yang lebih natural",
                         "hashtags": ["#ai", "#workflow", "#shorts"],
@@ -212,6 +259,20 @@ class GeminiHybridScorerTests(unittest.TestCase, SharedLLMHybridScorerAssertions
             },
         )
         self.assert_metadata_enrichment(scorer)
+
+    def test_rewrite_subtitle_chunks_cleans_asr_output(self) -> None:
+        settings = build_settings()
+        settings.openai_api_key = None
+        scorer = TestableGeminiHybridScorer(
+            settings,
+            {
+                "subtitle_chunks": [
+                    {"chunk_id": "chunk_01", "text": "Gue udah nyobain tool ini"},
+                    {"chunk_id": "chunk_02", "text": "dan hasilnya jauh lebih stabil"},
+                ]
+            },
+        )
+        self.assert_subtitle_cleanup(scorer)
 
 
 if __name__ == "__main__":

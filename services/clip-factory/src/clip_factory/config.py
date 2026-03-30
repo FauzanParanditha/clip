@@ -23,6 +23,8 @@ class Settings:
     gemini_model: str
     gemini_base_url: str
     gemini_timeout_seconds: int
+    llm_subtitle_cleanup_enabled: bool
+    llm_subtitle_cleanup_max_chunks: int
     fallback_clip_count: int
     whisper_model: str
     whisper_device: str
@@ -54,6 +56,8 @@ class Settings:
             gemini_model=os.getenv("CLIP_FACTORY_GEMINI_MODEL", "gemini-2.5-flash"),
             gemini_base_url=os.getenv("CLIP_FACTORY_GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"),
             gemini_timeout_seconds=max(5, int(os.getenv("CLIP_FACTORY_GEMINI_TIMEOUT_SECONDS", "60"))),
+            llm_subtitle_cleanup_enabled=(os.getenv("CLIP_FACTORY_LLM_SUBTITLE_CLEANUP", "false").lower() in {"1", "true", "yes", "on"}),
+            llm_subtitle_cleanup_max_chunks=max(4, min(24, int(os.getenv("CLIP_FACTORY_LLM_SUBTITLE_CLEANUP_MAX_CHUNKS", "16")))),
             fallback_clip_count=max(5, min(12, int(os.getenv("CLIP_FACTORY_FALLBACK_CLIP_COUNT", "8")))),
             whisper_model=os.getenv("CLIP_FACTORY_WHISPER_MODEL", "small"),
             whisper_device=os.getenv("CLIP_FACTORY_WHISPER_DEVICE", "cpu"),

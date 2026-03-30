@@ -159,12 +159,14 @@ class BaseLLMHybridScorer(ABC):
             ],
         }
         developer_prompt = (
-            "You are a senior short-form video editor for YouTube Shorts and TikTok. "
+            "You are a senior Indonesian short-form video producer optimizing clips for YouTube Shorts and TikTok. "
             "Re-score each candidate clip using the heuristic score as one signal, not as the final answer. "
-            "Prefer segments with a clean standalone story, strong opening line, practical value, emotional novelty, and clear payoff. "
-            "Penalize intros, outros, sponsorship, vague pronouns, filler, and clips that only make sense with missing visual context. "
-            "Keep hook_text in the source language, specific, natural, and at most 90 characters. "
-            "Return 3 to 6 useful keywords for subtitle highlighting. "
+            "Prefer segments with a strong first sentence, standalone context, practical takeaway, emotional novelty, and a clean payoff in under 60 seconds. "
+            "Penalize intros, outros, sponsorship, vague pronouns, filler, rambling, and clips that depend on missing on-screen context. "
+            "Write hook_text in the source language using natural spoken style. If the source is casual Indonesian, keep it casual and conversational. "
+            "Do not write generic teaser copy, English filler, or fake urgency. Keep hook_text concrete, punchy, and at most 90 characters. "
+            "Return 3 to 6 useful highlight keywords for subtitles; avoid stopwords and generic words. "
+            "Reason should be a concise editorial explanation of why the clip is strong or weak. "
             "You must return one result for every input segment_id."
         )
         schema = {
@@ -256,10 +258,14 @@ class BaseLLMHybridScorer(ABC):
             ],
         }
         developer_prompt = (
-            "You are a social video copywriter. Rewrite the metadata for each selected clip in the source language. "
-            "Create punchy but truthful titles, a clean caption, and focused highlight keywords. "
-            "Avoid generic patterns like 'in under a minute'. "
-            "Titles should feel clickable but not spammy, hashtags should be relevant, and selection_reason should explain why the clip is strong."
+            "You are a top-tier Indonesian social video copywriter. Rewrite the metadata for each selected clip in the source language. "
+            "Optimize for Indonesian YouTube Shorts and TikTok viewers. "
+            "Create a punchy hook card, 3 strong title options, a clean caption, relevant hashtags, focused highlight keywords, and one concise editorial selection_reason. "
+            "Avoid generic patterns like 'in under a minute', avoid robotic phrasing, and avoid hashtags built from stopwords. "
+            "If the source speaker sounds casual, preserve that tone naturally. Do not invent facts. "
+            "Hook text should be short, specific, and scroll-stopping without sounding clickbait. "
+            "Titles should be clickable but truthful. Caption should summarize the payoff in 1-2 natural sentences. "
+            "selection_reason should explain why people would keep watching or replay the clip."
         )
         schema = {
             "type": "object",
@@ -270,13 +276,14 @@ class BaseLLMHybridScorer(ABC):
                         "type": "object",
                         "properties": {
                             "clip_id": {"type": "string"},
+                            "hook_text": {"type": "string"},
                             "titles": {"type": "array", "items": {"type": "string"}},
                             "caption": {"type": "string"},
                             "hashtags": {"type": "array", "items": {"type": "string"}},
                             "highlight_keywords": {"type": "array", "items": {"type": "string"}},
                             "selection_reason": {"type": "string"},
                         },
-                        "required": ["clip_id", "titles", "caption", "hashtags", "highlight_keywords", "selection_reason"],
+                        "required": ["clip_id", "hook_text", "titles", "caption", "hashtags", "highlight_keywords", "selection_reason"],
                     },
                 }
             },
@@ -301,6 +308,7 @@ class BaseLLMHybridScorer(ABC):
                 metadata_by_clip_id[clip_id] = fallback
                 continue
 
+            hook_text = str(update.get("hook_text", fallback.hook_text)).strip()[:90] or fallback.hook_text
             titles = [str(item).strip()[:90] for item in update.get("titles", []) if str(item).strip()]
             caption = str(update.get("caption", fallback.caption)).strip()[:220] or fallback.caption
             hashtags = _dedupe_hashtags([str(item).strip() for item in update.get("hashtags", [])])[:15]
@@ -308,6 +316,7 @@ class BaseLLMHybridScorer(ABC):
             selection_reason = str(update.get("selection_reason", fallback.selection_reason)).strip()[:220] or fallback.selection_reason
 
             metadata_by_clip_id[clip_id] = ClipMetadata(
+                hook_text=hook_text,
                 titles=(titles[:3] or fallback.titles[:3]),
                 caption=caption,
                 hashtags=(hashtags or fallback.hashtags[:15]),
@@ -316,6 +325,84 @@ class BaseLLMHybridScorer(ABC):
                 selection_reason=selection_reason,
             )
         return metadata_by_clip_id
+
+    def rewrite_subtitle_chunks(
+        self,
+        job: JobState,
+        source: SourceAsset,
+        segment: SegmentCandidate,
+        chunks: list[str],
+    ) -> list[str] | None:
+        if not self.is_enabled() or not chunks:
+            return chunks
+
+        payload = {
+            "job_id": job.job_id,
+            "content_type": job.input.content_type,
+            "source_language": source.language or job.input.language_mode,
+            "source_title": source.title,
+            "clip_context": {
+                "start_ms": segment.start_ms,
+                "end_ms": segment.end_ms,
+                "heuristic_hook_text": segment.hook_text,
+                "excerpt": segment.text[:1200],
+            },
+            "subtitle_chunks": [
+                {
+                    "chunk_id": f"chunk_{index+1:02d}",
+                    "text": text,
+                }
+                for index, text in enumerate(chunks)
+            ],
+        }
+        developer_prompt = (
+            "You are an Indonesian subtitle editor for short-form video. "
+            "Clean ASR mistakes so subtitles match the spoken audio more closely, but do not invent facts. "
+            "Keep the original language and speaker tone. If the source is casual Indonesian, keep it casual. "
+            "Remove obvious mistranscriptions, repeated filler, broken words, and awkward phrasing. "
+            "Keep each subtitle chunk compact, readable on mobile, and semantically equivalent to what was said. "
+            "Do not translate to another language unless the source chunk is already mixing languages naturally. "
+            "Return one cleaned subtitle line for every chunk_id."
+        )
+        schema = {
+            "type": "object",
+            "properties": {
+                "subtitle_chunks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "chunk_id": {"type": "string"},
+                            "text": {"type": "string"},
+                        },
+                        "required": ["chunk_id", "text"],
+                    },
+                }
+            },
+            "required": ["subtitle_chunks"],
+        }
+        response_payload = self._generate_json(
+            developer_prompt=developer_prompt,
+            user_payload=payload,
+            schema_name="subtitle_chunk_cleanup",
+            schema_description="Cleaned subtitle chunks aligned to the original spoken audio.",
+            schema=schema,
+            max_output_tokens=2200,
+        )
+        if not response_payload:
+            return chunks
+
+        rewritten_by_id = {
+            item.get("chunk_id"): str(item.get("text", "")).strip()
+            for item in response_payload.get("subtitle_chunks", [])
+            if item.get("chunk_id")
+        }
+        rewritten_chunks: list[str] = []
+        for index, original in enumerate(chunks):
+            chunk_id = f"chunk_{index+1:02d}"
+            rewritten = rewritten_by_id.get(chunk_id) or original
+            rewritten_chunks.append(rewritten[:140])
+        return rewritten_chunks
 
     @abstractmethod
     def _api_key(self) -> str | None:
@@ -528,3 +615,15 @@ class HybridAISegmentScorer:
         if llm:
             return llm.enrich_clip_metadata(job, source, fallback_by_clip_id)
         return {clip_id: item[1] for clip_id, item in fallback_by_clip_id.items()}
+
+    def rewrite_subtitle_chunks(
+        self,
+        job: JobState,
+        source: SourceAsset,
+        segment: SegmentCandidate,
+        chunks: list[str],
+    ) -> list[str]:
+        llm = self._active_llm()
+        if llm:
+            return llm.rewrite_subtitle_chunks(job, source, segment, chunks) or chunks
+        return chunks
