@@ -55,7 +55,9 @@
       "parameters": {
         "method": "POST",
         "url": "=http://clip-api:8000/v1/jobs/{{$json[\"job_id\"]}}/ingest",
-        "options": {}
+        "options": {
+          "timeout": 1800000
+        }
       },
       "id": "Ingest",
       "name": "Ingest Source",
@@ -70,7 +72,9 @@
       "parameters": {
         "method": "POST",
         "url": "=http://clip-api:8000/v1/jobs/{{$json[\"job_id\"]}}/transcript",
-        "options": {}
+        "options": {
+          "timeout": 1800000
+        }
       },
       "id": "Transcript",
       "name": "Generate Transcript",

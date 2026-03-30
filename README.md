@@ -33,6 +33,12 @@ Stack compose di repo ini sekarang mem-pin `n8n` ke `2.13.3`, yaitu `stable` ter
 }
 ```
 
+Catatan operasional:
+
+- Step ingest dan transcript bisa memakan waktu lama untuk video panjang, terutama bila `faster-whisper` berjalan di CPU.
+- Workflow bawaan sekarang menaikkan timeout node HTTP berat menjadi `1800000ms` agar tidak cepat putus di n8n.
+- Backend juga menyediakan endpoint async `POST /v1/jobs/{job_id}/ingest/start` dan `POST /v1/jobs/{job_id}/transcript/start` jika Anda ingin mengubah workflow ke pola start lalu poll `GET /v1/jobs/{job_id}`.
+
 ## Kontrak AI scorer eksternal
 
 Jika Anda sudah punya agent AI sendiri, isi `CLIP_FACTORY_AI_SCORER_URL`. Service akan `POST` JSON berikut ke endpoint tersebut:
@@ -107,4 +113,5 @@ Pada mode ini:
 
 - Auto-reframe memakai subject tracking jika `opencv-python-headless` tersedia di image; fallback default adalah center crop.
 - Transkripsi default memakai `faster-whisper` jika dependency dipasang. Tanpa engine ASR, Anda masih bisa menguji pipeline dengan meletakkan transcript sidecar JSON di folder job.
+- Default transkripsi memakai model `small` pada `cpu` dengan `int8`. Untuk percepatan test di server CPU, Anda bisa menurunkan `CLIP_FACTORY_WHISPER_MODEL` ke `base` atau `tiny` di env.
 - Auto-post ke YouTube/TikTok belum diaktifkan. V1 berhenti di aset siap upload.

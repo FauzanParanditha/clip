@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from .async_steps import BackgroundStepRunner
 from .config import Settings
 from .contracts import IntakeRequest
 from .pipeline import ClipPipeline
@@ -22,6 +23,7 @@ class IntakeJobModel(BaseModel):
 settings = Settings.from_env()
 store = JsonJobStore(settings.data_dir)
 pipeline = ClipPipeline(settings, store)
+step_runner = BackgroundStepRunner()
 app = FastAPI(title="AI Clip Factory", version="0.1.0")
 
 
@@ -51,9 +53,19 @@ def ingest_job(job_id: str) -> dict:
     return _run_step(lambda: pipeline.run_ingest_step(job_id).to_dict())
 
 
+@app.post("/v1/jobs/{job_id}/ingest/start")
+def start_ingest_job(job_id: str) -> dict:
+    return _run_step(lambda: _start_background_step(job_id, "ingest", lambda: pipeline.run_ingest_step(job_id)))
+
+
 @app.post("/v1/jobs/{job_id}/transcript")
 def transcribe_job(job_id: str) -> dict:
     return _run_step(lambda: pipeline.run_transcript_step(job_id).to_dict())
+
+
+@app.post("/v1/jobs/{job_id}/transcript/start")
+def start_transcribe_job(job_id: str) -> dict:
+    return _run_step(lambda: _start_background_step(job_id, "transcript", lambda: pipeline.run_transcript_step(job_id)))
 
 
 @app.post("/v1/jobs/{job_id}/rank")
@@ -96,3 +108,15 @@ def _run_step(callback):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+
+def _start_background_step(job_id: str, step_name: str, callback) -> dict:
+    job = pipeline.get_job(job_id)
+    started = step_runner.start(f"{job_id}:{step_name}", callback)
+    refreshed = pipeline.get_job(job_id)
+    return {
+        "job_id": job.job_id,
+        "step": step_name,
+        "started": started,
+        "running": step_runner.is_running(f"{job_id}:{step_name}"),
+        "job": refreshed.to_dict(),
+    }
