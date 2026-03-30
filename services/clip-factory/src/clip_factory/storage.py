@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import time
 from json import JSONDecodeError
 from pathlib import Path
@@ -51,8 +53,18 @@ class JsonJobStore:
 
     def write_json(self, path: Path, data: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_suffix(f"{path.suffix}.tmp")
-        temp_path.write_text(json.dumps(data, indent=2, ensure_ascii=True), encoding="utf-8")
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            handle.write(json.dumps(data, indent=2, ensure_ascii=True))
+            handle.flush()
+            os.fsync(handle.fileno())
+            temp_path = Path(handle.name)
         temp_path.replace(path)
 
     def read_json(self, path: Path) -> dict:
