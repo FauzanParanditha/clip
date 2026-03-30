@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import time
+from json import JSONDecodeError
 from pathlib import Path
 
 from .contracts import ClipState, JobState, TranscriptDocument
@@ -49,10 +51,21 @@ class JsonJobStore:
 
     def write_json(self, path: Path, data: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=True), encoding="utf-8")
+        temp_path = path.with_suffix(f"{path.suffix}.tmp")
+        temp_path.write_text(json.dumps(data, indent=2, ensure_ascii=True), encoding="utf-8")
+        temp_path.replace(path)
 
     def read_json(self, path: Path) -> dict:
-        return json.loads(path.read_text(encoding="utf-8"))
+        last_error: Exception | None = None
+        for _ in range(5):
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except (FileNotFoundError, JSONDecodeError) as exc:
+                last_error = exc
+                time.sleep(0.02)
+        if last_error:
+            raise last_error
+        raise FileNotFoundError(path)
 
     def save_job(self, job: JobState) -> None:
         self.write_json(self.job_file(job.job_id), job.to_dict())
@@ -79,4 +92,3 @@ class JsonJobStore:
         for path in sorted(self.clips_dir(job_id).glob("*.json")):
             clips.append(ClipState.from_dict(self.read_json(path)))
         return clips
-
