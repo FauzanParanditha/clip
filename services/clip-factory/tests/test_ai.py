@@ -27,6 +27,16 @@ class TestableGeminiHybridScorer(GeminiHybridScorer):
         return self._response_payload
 
 
+class PromptCapturingOpenAIHybridScorer(OpenAIHybridScorer):
+    def __init__(self, settings: Settings) -> None:
+        super().__init__(settings)
+        self.calls: list[dict] = []
+
+    def _generate_json(self, **kwargs):  # type: ignore[override]
+        self.calls.append(kwargs)
+        return None
+
+
 def build_settings() -> Settings:
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
@@ -217,6 +227,57 @@ class OpenAIHybridScorerTests(unittest.TestCase, SharedLLMHybridScorerAssertions
             },
         )
         self.assert_subtitle_cleanup(scorer)
+
+    def test_prompts_follow_english_source_language(self) -> None:
+        settings = build_settings()
+        scorer = PromptCapturingOpenAIHybridScorer(settings)
+        job = JobState(job_id="job_1", input=IntakeRequest(source_url="https://example.com", content_type="other"))
+        source = SourceAsset(source_url="https://example.com", title="Source video", language="en")
+        segment = SegmentCandidate(
+            segment_id="seg_1",
+            start_ms=0,
+            end_ms=30000,
+            score=80.0,
+            reason="heuristic",
+            hook_text="Old hook",
+            keywords=["old"],
+            confidence=0.9,
+            text="This is a test clip.",
+        )
+        fallback = ClipMetadata(
+            hook_text="Fallback hook",
+            titles=["Fallback 1", "Fallback 2", "Fallback 3"],
+            caption="Fallback caption",
+            hashtags=["#fallback"],
+            highlight_keywords=["fallback"],
+            source_timestamp_label="00:00",
+            selection_reason="Fallback reason",
+        )
+
+        scorer.enrich_clip_metadata(job, source, {"clip_01": (segment, fallback)})
+        self.assertIn("Write everything in English only.", scorer.calls[0]["developer_prompt"])
+
+    def test_news_prompt_adds_headline_bias(self) -> None:
+        settings = build_settings()
+        scorer = PromptCapturingOpenAIHybridScorer(settings)
+        job = JobState(job_id="job_1", input=IntakeRequest(source_url="https://example.com", content_type="news"))
+        source = SourceAsset(source_url="https://example.com", title="Source video", language="en")
+        candidates = [
+            SegmentCandidate(
+                segment_id="seg_1",
+                start_ms=0,
+                end_ms=30000,
+                score=60.0,
+                reason="heuristic",
+                hook_text="Old hook",
+                keywords=["old"],
+                confidence=0.9,
+                text="This is a test clip.",
+            )
+        ]
+
+        scorer.enrich_candidates(job, source, candidates)
+        self.assertIn("For news clips, strongly prefer segments that surface the headline", scorer.calls[0]["developer_prompt"])
 
 
 class GeminiHybridScorerTests(unittest.TestCase, SharedLLMHybridScorerAssertions):

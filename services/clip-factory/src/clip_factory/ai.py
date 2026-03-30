@@ -48,6 +48,47 @@ def _strict_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return normalize(schema)
 
 
+def _resolve_output_language(job: JobState, source: SourceAsset) -> str:
+    requested = (job.input.language_mode or "").strip().lower()
+    source_language = (source.language or "").strip().lower()
+    if requested and requested not in {"same_as_source", "source", "auto"}:
+        return requested
+    return source_language or requested
+
+
+def _language_instruction(job: JobState, source: SourceAsset) -> str:
+    language = _resolve_output_language(job, source)
+    if language.startswith("en") or language in {"english"}:
+        return (
+            "Write everything in English only. Do not translate into Indonesian or mix in Indonesian phrasing. "
+            "Keep wording natural for native English-speaking viewers."
+        )
+    if language.startswith("id") or language in {"indonesian", "bahasa indonesia", "bahasa"}:
+        return (
+            "Write everything in Indonesian only. Do not translate into English except for product names or terms that are naturally said in English. "
+            "Keep wording natural for Indonesian viewers."
+        )
+    return "Write everything in the same language as the source transcript. Do not translate into another language."
+
+
+def _news_candidate_instruction() -> str:
+    return (
+        "For news clips, strongly prefer segments that surface the headline, what changed, who said it, why it matters now, and the immediate consequence. "
+        "Prefer crisp escalation, clear cause-and-effect, and standalone context within the first sentence. "
+        "Penalize analysis-heavy tangents, niche tactical detail without payoff, and segments that require too much prior context. "
+        "Do not sensationalize or invent implications beyond what the source supports."
+    )
+
+
+def _news_metadata_instruction() -> str:
+    return (
+        "For news clips, write titles and hook text like sharp, accurate news headlines. "
+        "Lead with the update, escalation, or consequence. "
+        "Keep captions concise and factual: what happened, what changed, and why it matters now. "
+        "Avoid creator-style filler, vague curiosity bait, or hype that is not grounded in the source."
+    )
+
+
 class ExternalAISegmentScorer:
     def __init__(self, endpoint_url: str | None, bearer_token: str | None = None, timeout_seconds: int = 45) -> None:
         self.endpoint_url = endpoint_url
@@ -159,14 +200,17 @@ class BaseLLMHybridScorer(ABC):
             ],
         }
         developer_prompt = (
-            "You are a senior Indonesian short-form video producer optimizing clips for YouTube Shorts and TikTok. "
+            "You are a senior short-form video producer optimizing clips for YouTube Shorts and TikTok. "
             "Re-score each candidate clip using the heuristic score as one signal, not as the final answer. "
             "Prefer segments with a strong first sentence, standalone context, practical takeaway, emotional novelty, and a clean payoff in under 60 seconds. "
             "Penalize intros, outros, sponsorship, vague pronouns, filler, rambling, and clips that depend on missing on-screen context. "
-            "Write hook_text in the source language using natural spoken style. If the source is casual Indonesian, keep it casual and conversational. "
-            "Do not write generic teaser copy, English filler, or fake urgency. Keep hook_text concrete, punchy, and at most 90 characters. "
+            f"{_language_instruction(job, source)} "
+            "Write hook_text in the source language using natural spoken style. If the speaker sounds casual, preserve that tone naturally. "
+            "Do not write generic teaser copy, fake urgency, or language mixing that is not present in the source. "
+            "Keep hook_text concrete, punchy, and at most 90 characters. "
             "Return 3 to 6 useful highlight keywords for subtitles; avoid stopwords and generic words. "
             "Reason should be a concise editorial explanation of why the clip is strong or weak. "
+            f"{_news_candidate_instruction() if job.input.content_type == 'news' else ''} "
             "You must return one result for every input segment_id."
         )
         schema = {
@@ -258,13 +302,14 @@ class BaseLLMHybridScorer(ABC):
             ],
         }
         developer_prompt = (
-            "You are a top-tier Indonesian social video copywriter. Rewrite the metadata for each selected clip in the source language. "
-            "Optimize for Indonesian YouTube Shorts and TikTok viewers. "
+            "You are a top-tier social video copywriter. Rewrite the metadata for each selected clip in the source language. "
+            f"{_language_instruction(job, source)} "
             "Create a punchy hook card, 3 strong title options, a clean caption, relevant hashtags, focused highlight keywords, and one concise editorial selection_reason. "
             "Avoid generic patterns like 'in under a minute', avoid robotic phrasing, and avoid hashtags built from stopwords. "
             "If the source speaker sounds casual, preserve that tone naturally. Do not invent facts. "
             "Hook text should be short, specific, and scroll-stopping without sounding clickbait. "
             "Titles should be clickable but truthful. Caption should summarize the payoff in 1-2 natural sentences. "
+            f"{_news_metadata_instruction() if job.input.content_type == 'news' else ''} "
             "selection_reason should explain why people would keep watching or replay the clip."
         )
         schema = {
@@ -356,10 +401,10 @@ class BaseLLMHybridScorer(ABC):
             ],
         }
         developer_prompt = (
-            "You are an Indonesian subtitle editor for short-form video. "
+            "You are a subtitle editor for short-form video. "
             "Clean ASR mistakes so subtitles match the spoken audio more closely, but do not invent facts. "
-            "Keep the original language and speaker tone. If the source is casual Indonesian, keep it casual. "
-            "Remove obvious mistranscriptions, repeated filler, broken words, and awkward phrasing. "
+            f"{_language_instruction(job, source)} "
+            "Keep the original speaker tone. Remove obvious mistranscriptions, repeated filler, broken words, and awkward phrasing. "
             "Keep each subtitle chunk compact, readable on mobile, and semantically equivalent to what was said. "
             "Do not translate to another language unless the source chunk is already mixing languages naturally. "
             "Return one cleaned subtitle line for every chunk_id."
