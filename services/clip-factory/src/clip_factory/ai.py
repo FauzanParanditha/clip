@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+from abc import ABC, abstractmethod
 from dataclasses import replace
 from typing import Any
-from urllib import error, request
+from urllib import error, parse, request
 
 from .config import Settings
 from .contracts import ClipMetadata, JobState, SegmentCandidate, SourceAsset
@@ -104,16 +105,9 @@ class ExternalAISegmentScorer:
         return sorted(updated, key=lambda item: item.score, reverse=True)
 
 
-class OpenAIHybridScorer:
-    def __init__(self, settings: Settings) -> None:
-        self.api_key = settings.openai_api_key
-        self.model = settings.openai_model
-        self.base_url = settings.openai_base_url
-        self.timeout_seconds = settings.openai_timeout_seconds
-        self.reasoning_effort = settings.openai_reasoning_effort
-
+class BaseLLMHybridScorer(ABC):
     def is_enabled(self) -> bool:
-        return bool(self.api_key)
+        return bool(self._api_key())
 
     def enrich_candidates(
         self,
@@ -160,22 +154,17 @@ class OpenAIHybridScorer:
         )
         schema = {
             "type": "object",
-            "additionalProperties": False,
             "properties": {
                 "segments": {
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "additionalProperties": False,
                         "properties": {
                             "segment_id": {"type": "string"},
                             "score": {"type": "number"},
                             "reason": {"type": "string"},
                             "hook_text": {"type": "string"},
-                            "keywords": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
+                            "keywords": {"type": "array", "items": {"type": "string"}},
                         },
                         "required": ["segment_id", "score", "reason", "hook_text", "keywords"],
                     },
@@ -183,7 +172,7 @@ class OpenAIHybridScorer:
             },
             "required": ["segments"],
         }
-        response_payload = self._responses_json(
+        response_payload = self._generate_json(
             developer_prompt=developer_prompt,
             user_payload=payload,
             schema_name="clip_candidate_ranking",
@@ -259,13 +248,11 @@ class OpenAIHybridScorer:
         )
         schema = {
             "type": "object",
-            "additionalProperties": False,
             "properties": {
                 "clips": {
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "additionalProperties": False,
                         "properties": {
                             "clip_id": {"type": "string"},
                             "titles": {"type": "array", "items": {"type": "string"}},
@@ -280,7 +267,7 @@ class OpenAIHybridScorer:
             },
             "required": ["clips"],
         }
-        response_payload = self._responses_json(
+        response_payload = self._generate_json(
             developer_prompt=developer_prompt,
             user_payload=payload,
             schema_name="clip_metadata_rewrite",
@@ -315,7 +302,35 @@ class OpenAIHybridScorer:
             )
         return metadata_by_clip_id
 
-    def _responses_json(
+    @abstractmethod
+    def _api_key(self) -> str | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def _generate_json(
+        self,
+        developer_prompt: str,
+        user_payload: dict[str, Any],
+        schema_name: str,
+        schema_description: str,
+        schema: dict[str, Any],
+        max_output_tokens: int,
+    ) -> dict[str, Any] | None:
+        raise NotImplementedError
+
+
+class OpenAIHybridScorer(BaseLLMHybridScorer):
+    def __init__(self, settings: Settings) -> None:
+        self.api_key = settings.openai_api_key
+        self.model = settings.openai_model
+        self.base_url = settings.openai_base_url
+        self.timeout_seconds = settings.openai_timeout_seconds
+        self.reasoning_effort = settings.openai_reasoning_effort
+
+    def _api_key(self) -> str | None:
+        return self.api_key
+
+    def _generate_json(
         self,
         developer_prompt: str,
         user_payload: dict[str, Any],
@@ -365,34 +380,25 @@ class OpenAIHybridScorer:
         except (error.URLError, error.HTTPError, TimeoutError, json.JSONDecodeError):
             return None
 
-        output_text = self._extract_output_text(response_payload)
-        if not output_text:
-            return None
-
-        try:
-            return json.loads(output_text)
-        except json.JSONDecodeError:
-            return None
-
-    def _extract_output_text(self, payload: dict[str, Any]) -> str | None:
-        direct = payload.get("output_text")
+        direct = response_payload.get("output_text")
         if isinstance(direct, str) and direct.strip():
-            return direct
+            try:
+                return json.loads(direct)
+            except json.JSONDecodeError:
+                return None
 
-        for item in payload.get("output", []):
+        for item in response_payload.get("output", []):
             if not isinstance(item, dict):
                 continue
             for content in item.get("content", []):
                 if not isinstance(content, dict):
                     continue
-                if content.get("type") == "output_text":
-                    text = content.get("text")
-                    if isinstance(text, str) and text.strip():
-                        return text
-                if content.get("type") == "text":
-                    text = content.get("text")
-                    if isinstance(text, str) and text.strip():
-                        return text
+                text = content.get("text")
+                if isinstance(text, str) and text.strip():
+                    try:
+                        return json.loads(text)
+                    except json.JSONDecodeError:
+                        continue
         return None
 
     def _supports_reasoning(self) -> bool:
@@ -400,17 +406,101 @@ class OpenAIHybridScorer:
         return model.startswith("gpt-5") or model.startswith("o")
 
 
+class GeminiHybridScorer(BaseLLMHybridScorer):
+    def __init__(self, settings: Settings) -> None:
+        self.api_key = settings.gemini_api_key
+        self.model = settings.gemini_model
+        self.base_url = settings.gemini_base_url.rstrip("/")
+        self.timeout_seconds = settings.gemini_timeout_seconds
+
+    def _api_key(self) -> str | None:
+        return self.api_key
+
+    def _generate_json(
+        self,
+        developer_prompt: str,
+        user_payload: dict[str, Any],
+        schema_name: str,
+        schema_description: str,
+        schema: dict[str, Any],
+        max_output_tokens: int,
+    ) -> dict[str, Any] | None:
+        if not self.api_key:
+            return None
+
+        endpoint = f"{self.base_url}/models/{self.model}:generateContent?key={parse.quote(self.api_key)}"
+        body = {
+            "systemInstruction": {
+                "parts": [{"text": developer_prompt}]
+            },
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": json.dumps(user_payload, ensure_ascii=False)}],
+                }
+            ],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseSchema": schema,
+                "maxOutputTokens": max_output_tokens,
+                "temperature": 0.2,
+            },
+        }
+        http_request = request.Request(
+            endpoint,
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with request.urlopen(http_request, timeout=self.timeout_seconds) as response:
+                response_payload = json.loads(response.read().decode("utf-8"))
+        except (error.URLError, error.HTTPError, TimeoutError, json.JSONDecodeError):
+            return None
+
+        for candidate in response_payload.get("candidates", []):
+            if not isinstance(candidate, dict):
+                continue
+            content = candidate.get("content", {})
+            if not isinstance(content, dict):
+                continue
+            for part in content.get("parts", []):
+                if not isinstance(part, dict):
+                    continue
+                text = part.get("text")
+                if isinstance(text, str) and text.strip():
+                    try:
+                        return json.loads(text)
+                    except json.JSONDecodeError:
+                        continue
+        return None
+
+
 class HybridAISegmentScorer:
     def __init__(self, settings: Settings) -> None:
         self.external = ExternalAISegmentScorer(settings.ai_scorer_url, settings.ai_scorer_bearer_token)
         self.openai = OpenAIHybridScorer(settings)
+        self.gemini = GeminiHybridScorer(settings)
+        self.llm_provider = settings.llm_provider
+
+    def _active_llm(self) -> BaseLLMHybridScorer | None:
+        if self.llm_provider == "openai":
+            return self.openai if self.openai.is_enabled() else None
+        if self.llm_provider == "gemini":
+            return self.gemini if self.gemini.is_enabled() else None
+        if self.openai.is_enabled():
+            return self.openai
+        if self.gemini.is_enabled():
+            return self.gemini
+        return None
 
     def enrich_candidates(self, job: JobState, source: SourceAsset, candidates: list[SegmentCandidate]) -> list[SegmentCandidate]:
         enriched = candidates
         if self.external.is_enabled():
             enriched = self.external.enrich_candidates(job, source, enriched)
-        if self.openai.is_enabled():
-            enriched = self.openai.enrich_candidates(job, source, enriched)
+        llm = self._active_llm()
+        if llm:
+            enriched = llm.enrich_candidates(job, source, enriched)
         return sorted(enriched, key=lambda item: item.score, reverse=True)
 
     def enrich_clip_metadata(
@@ -419,6 +509,7 @@ class HybridAISegmentScorer:
         source: SourceAsset,
         fallback_by_clip_id: dict[str, tuple[SegmentCandidate, ClipMetadata]],
     ) -> dict[str, ClipMetadata]:
-        if self.openai.is_enabled():
-            return self.openai.enrich_clip_metadata(job, source, fallback_by_clip_id)
+        llm = self._active_llm()
+        if llm:
+            return llm.enrich_clip_metadata(job, source, fallback_by_clip_id)
         return {clip_id: item[1] for clip_id, item in fallback_by_clip_id.items()}

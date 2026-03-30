@@ -88,7 +88,7 @@ Jika endpoint AI tidak diisi atau gagal, pipeline otomatis fallback ke heuristic
 Repo ini sekarang mendukung mode hybrid bawaan:
 
 - heuristic lokal tetap membangun kandidat segmen awal secara cepat
-- jika `CLIP_FACTORY_OPENAI_API_KEY` diisi, OpenAI dipakai untuk:
+- jika `CLIP_FACTORY_OPENAI_API_KEY` atau `CLIP_FACTORY_GEMINI_API_KEY` diisi, LLM dipakai untuk:
   - re-score kandidat segmen terbaik
   - rewrite `hook_text`, `reason`, dan `keywords`
   - rewrite metadata clip terpilih (`titles`, `caption`, `hashtags`, `highlight_keywords`)
@@ -97,18 +97,29 @@ Repo ini sekarang mendukung mode hybrid bawaan:
 Env yang dipakai:
 
 ```env
+CLIP_FACTORY_LLM_PROVIDER=auto
 CLIP_FACTORY_OPENAI_API_KEY=
 CLIP_FACTORY_OPENAI_MODEL=gpt-5-mini
 CLIP_FACTORY_OPENAI_BASE_URL=https://api.openai.com/v1/responses
 CLIP_FACTORY_OPENAI_TIMEOUT_SECONDS=60
 CLIP_FACTORY_OPENAI_REASONING_EFFORT=
+CLIP_FACTORY_GEMINI_API_KEY=
+CLIP_FACTORY_GEMINI_MODEL=gemini-2.5-flash
+CLIP_FACTORY_GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+CLIP_FACTORY_GEMINI_TIMEOUT_SECONDS=60
 ```
 
-Jika `CLIP_FACTORY_AI_SCORER_URL` dan `CLIP_FACTORY_OPENAI_API_KEY` sama-sama diisi, alurnya menjadi:
+Nilai `CLIP_FACTORY_LLM_PROVIDER`:
+
+- `auto`: pakai OpenAI jika key tersedia, kalau tidak maka pakai Gemini
+- `openai`: paksa pakai OpenAI
+- `gemini`: paksa pakai Gemini
+
+Jika `CLIP_FACTORY_AI_SCORER_URL` dan LLM key sama-sama diisi, alurnya menjadi:
 
 1. heuristic lokal membuat kandidat
 2. external scorer opsional memperkaya skor kandidat
-3. OpenAI melakukan re-score akhir dan rewrite metadata clip
+3. provider LLM melakukan re-score akhir dan rewrite metadata clip
 
 ## Deploy ke Self-Hosted n8n
 

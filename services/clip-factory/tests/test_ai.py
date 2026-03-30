@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
-from clip_factory.ai import OpenAIHybridScorer
+from clip_factory.ai import GeminiHybridScorer, OpenAIHybridScorer
 from clip_factory.config import Settings
 from clip_factory.contracts import ClipMetadata, IntakeRequest, JobState, SegmentCandidate, SourceAsset
 
@@ -12,49 +14,51 @@ class TestableOpenAIHybridScorer(OpenAIHybridScorer):
         super().__init__(settings)
         self._response_payload = response_payload
 
-    def _responses_json(self, **kwargs):  # type: ignore[override]
+    def _generate_json(self, **kwargs):  # type: ignore[override]
+        return self._response_payload
+
+
+class TestableGeminiHybridScorer(GeminiHybridScorer):
+    def __init__(self, settings: Settings, response_payload: dict | None) -> None:
+        super().__init__(settings)
+        self._response_payload = response_payload
+
+    def _generate_json(self, **kwargs):  # type: ignore[override]
         return self._response_payload
 
 
 def build_settings() -> Settings:
-    return Settings(
-        data_dir=None,  # type: ignore[arg-type]
-        output_dir=None,  # type: ignore[arg-type]
-        redis_url="redis://localhost:6379/0",
-        queue_key="clip-factory:render",
-        ai_scorer_url=None,
-        ai_scorer_bearer_token=None,
-        openai_api_key="test-key",
-        openai_model="gpt-5-mini",
-        openai_base_url="https://api.openai.com/v1/responses",
-        openai_timeout_seconds=60,
-        openai_reasoning_effort="low",
-        fallback_clip_count=8,
-        whisper_model="tiny",
-        whisper_device="cpu",
-        whisper_compute_type="int8",
-        ffmpeg_binary="ffmpeg",
-        ytdlp_binary="yt-dlp",
-        subtitle_font="Arial",
-    )
-
-
-class OpenAIHybridScorerTests(unittest.TestCase):
-    def test_enrich_candidates_blends_llm_and_heuristic_scores(self) -> None:
-        scorer = TestableOpenAIHybridScorer(
-            build_settings(),
-            {
-                "segments": [
-                    {
-                        "segment_id": "seg_1",
-                        "score": 92,
-                        "reason": "Strong payoff and clear standalone setup",
-                        "hook_text": "Ini bagian paling kuat buat dijadiin shorts",
-                        "keywords": ["workflow", "ai", "coding"],
-                    }
-                ]
-            },
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        return Settings(
+            data_dir=root / "data",
+            output_dir=root / "outputs",
+            redis_url="redis://localhost:6379/0",
+            queue_key="clip-factory:render",
+            ai_scorer_url=None,
+            ai_scorer_bearer_token=None,
+            llm_provider="auto",
+            openai_api_key="test-openai-key",
+            openai_model="gpt-5-mini",
+            openai_base_url="https://api.openai.com/v1/responses",
+            openai_timeout_seconds=60,
+            openai_reasoning_effort=None,
+            gemini_api_key="test-gemini-key",
+            gemini_model="gemini-2.5-flash",
+            gemini_base_url="https://generativelanguage.googleapis.com/v1beta",
+            gemini_timeout_seconds=60,
+            fallback_clip_count=8,
+            whisper_model="tiny",
+            whisper_device="cpu",
+            whisper_compute_type="int8",
+            ffmpeg_binary="ffmpeg",
+            ytdlp_binary="yt-dlp",
+            subtitle_font="Arial",
         )
+
+
+class SharedLLMHybridScorerAssertions:
+    def assert_candidate_enrichment(self, scorer) -> None:
         job = JobState(job_id="job_1", input=IntakeRequest(source_url="https://example.com"))
         source = SourceAsset(source_url="https://example.com", title="Video sumber", language="id")
         candidates = [
@@ -77,22 +81,7 @@ class OpenAIHybridScorerTests(unittest.TestCase):
         self.assertEqual(enriched[0].hook_text, "Ini bagian paling kuat buat dijadiin shorts")
         self.assertEqual(enriched[0].keywords, ["workflow", "ai", "coding"])
 
-    def test_enrich_clip_metadata_uses_llm_rewrite_and_fallbacks(self) -> None:
-        scorer = TestableOpenAIHybridScorer(
-            build_settings(),
-            {
-                "clips": [
-                    {
-                        "clip_id": "clip_01",
-                        "titles": ["Judul AI 1", "Judul AI 2", "Judul AI 3"],
-                        "caption": "Caption AI yang lebih natural",
-                        "hashtags": ["#ai", "#workflow", "#shorts"],
-                        "highlight_keywords": ["workflow", "automation", "shorts"],
-                        "selection_reason": "Bagian ini paling jelas payoff-nya.",
-                    }
-                ]
-            },
-        )
+    def assert_metadata_enrichment(self, scorer) -> None:
         job = JobState(job_id="job_1", input=IntakeRequest(source_url="https://example.com"))
         source = SourceAsset(source_url="https://example.com", title="Video sumber", language="id")
         segment = SegmentCandidate(
@@ -120,6 +109,84 @@ class OpenAIHybridScorerTests(unittest.TestCase):
         self.assertEqual(result["clip_01"].caption, "Caption AI yang lebih natural")
         self.assertIn("#ai", result["clip_01"].hashtags)
         self.assertEqual(result["clip_02"].titles[0], "Fallback 1")
+
+
+class OpenAIHybridScorerTests(unittest.TestCase, SharedLLMHybridScorerAssertions):
+    def test_enrich_candidates_blends_llm_and_heuristic_scores(self) -> None:
+        scorer = TestableOpenAIHybridScorer(
+            build_settings(),
+            {
+                "segments": [
+                    {
+                        "segment_id": "seg_1",
+                        "score": 92,
+                        "reason": "Strong payoff and clear standalone setup",
+                        "hook_text": "Ini bagian paling kuat buat dijadiin shorts",
+                        "keywords": ["workflow", "ai", "coding"],
+                    }
+                ]
+            },
+        )
+        self.assert_candidate_enrichment(scorer)
+
+    def test_enrich_clip_metadata_uses_llm_rewrite_and_fallbacks(self) -> None:
+        scorer = TestableOpenAIHybridScorer(
+            build_settings(),
+            {
+                "clips": [
+                    {
+                        "clip_id": "clip_01",
+                        "titles": ["Judul AI 1", "Judul AI 2", "Judul AI 3"],
+                        "caption": "Caption AI yang lebih natural",
+                        "hashtags": ["#ai", "#workflow", "#shorts"],
+                        "highlight_keywords": ["workflow", "automation", "shorts"],
+                        "selection_reason": "Bagian ini paling jelas payoff-nya.",
+                    }
+                ]
+            },
+        )
+        self.assert_metadata_enrichment(scorer)
+
+
+class GeminiHybridScorerTests(unittest.TestCase, SharedLLMHybridScorerAssertions):
+    def test_enrich_candidates_blends_llm_and_heuristic_scores(self) -> None:
+        settings = build_settings()
+        settings.openai_api_key = None
+        scorer = TestableGeminiHybridScorer(
+            settings,
+            {
+                "segments": [
+                    {
+                        "segment_id": "seg_1",
+                        "score": 92,
+                        "reason": "Strong payoff and clear standalone setup",
+                        "hook_text": "Ini bagian paling kuat buat dijadiin shorts",
+                        "keywords": ["workflow", "ai", "coding"],
+                    }
+                ]
+            },
+        )
+        self.assert_candidate_enrichment(scorer)
+
+    def test_enrich_clip_metadata_uses_llm_rewrite_and_fallbacks(self) -> None:
+        settings = build_settings()
+        settings.openai_api_key = None
+        scorer = TestableGeminiHybridScorer(
+            settings,
+            {
+                "clips": [
+                    {
+                        "clip_id": "clip_01",
+                        "titles": ["Judul AI 1", "Judul AI 2", "Judul AI 3"],
+                        "caption": "Caption AI yang lebih natural",
+                        "hashtags": ["#ai", "#workflow", "#shorts"],
+                        "highlight_keywords": ["workflow", "automation", "shorts"],
+                        "selection_reason": "Bagian ini paling jelas payoff-nya.",
+                    }
+                ]
+            },
+        )
+        self.assert_metadata_enrichment(scorer)
 
 
 if __name__ == "__main__":

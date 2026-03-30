@@ -13,11 +13,16 @@ class Settings:
     queue_key: str
     ai_scorer_url: str | None
     ai_scorer_bearer_token: str | None
+    llm_provider: str
     openai_api_key: str | None
     openai_model: str
     openai_base_url: str
     openai_timeout_seconds: int
     openai_reasoning_effort: str | None
+    gemini_api_key: str | None
+    gemini_model: str
+    gemini_base_url: str
+    gemini_timeout_seconds: int
     fallback_clip_count: int
     whisper_model: str
     whisper_device: str
@@ -39,11 +44,16 @@ class Settings:
             queue_key=os.getenv("CLIP_FACTORY_QUEUE_KEY", "clip-factory:render"),
             ai_scorer_url=os.getenv("CLIP_FACTORY_AI_SCORER_URL") or None,
             ai_scorer_bearer_token=os.getenv("CLIP_FACTORY_AI_SCORER_BEARER_TOKEN") or None,
+            llm_provider=os.getenv("CLIP_FACTORY_LLM_PROVIDER", "auto").lower(),
             openai_api_key=os.getenv("CLIP_FACTORY_OPENAI_API_KEY") or None,
             openai_model=os.getenv("CLIP_FACTORY_OPENAI_MODEL", "gpt-5-mini"),
             openai_base_url=os.getenv("CLIP_FACTORY_OPENAI_BASE_URL", "https://api.openai.com/v1/responses"),
             openai_timeout_seconds=max(5, int(os.getenv("CLIP_FACTORY_OPENAI_TIMEOUT_SECONDS", "60"))),
             openai_reasoning_effort=os.getenv("CLIP_FACTORY_OPENAI_REASONING_EFFORT") or None,
+            gemini_api_key=os.getenv("CLIP_FACTORY_GEMINI_API_KEY") or None,
+            gemini_model=os.getenv("CLIP_FACTORY_GEMINI_MODEL", "gemini-2.5-flash"),
+            gemini_base_url=os.getenv("CLIP_FACTORY_GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"),
+            gemini_timeout_seconds=max(5, int(os.getenv("CLIP_FACTORY_GEMINI_TIMEOUT_SECONDS", "60"))),
             fallback_clip_count=max(5, min(12, int(os.getenv("CLIP_FACTORY_FALLBACK_CLIP_COUNT", "8")))),
             whisper_model=os.getenv("CLIP_FACTORY_WHISPER_MODEL", "small"),
             whisper_device=os.getenv("CLIP_FACTORY_WHISPER_DEVICE", "cpu"),
