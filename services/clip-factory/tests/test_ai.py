@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from clip_factory.ai import GeminiHybridScorer, OpenAIHybridScorer
+from clip_factory.ai import GeminiHybridScorer, OpenAIHybridScorer, _strict_json_schema
 from clip_factory.config import Settings
 from clip_factory.contracts import ClipMetadata, IntakeRequest, JobState, SegmentCandidate, SourceAsset
 
@@ -112,6 +112,31 @@ class SharedLLMHybridScorerAssertions:
 
 
 class OpenAIHybridScorerTests(unittest.TestCase, SharedLLMHybridScorerAssertions):
+    def test_strict_json_schema_adds_additional_properties_false_recursively(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "clips": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "titles": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            }
+                        },
+                        "required": ["titles"],
+                    },
+                }
+            },
+            "required": ["clips"],
+        }
+
+        strict_schema = _strict_json_schema(schema)
+        self.assertFalse(strict_schema["additionalProperties"])
+        self.assertFalse(strict_schema["properties"]["clips"]["items"]["additionalProperties"])
+
     def test_enrich_candidates_blends_llm_and_heuristic_scores(self) -> None:
         scorer = TestableOpenAIHybridScorer(
             build_settings(),

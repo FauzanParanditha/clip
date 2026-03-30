@@ -33,6 +33,21 @@ def _dedupe_hashtags(values: list[str]) -> list[str]:
     return deduped
 
 
+def _strict_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    def normalize(node: Any) -> Any:
+        if isinstance(node, list):
+            return [normalize(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+
+        normalized = {key: normalize(value) for key, value in node.items()}
+        if normalized.get("type") == "object":
+            normalized.setdefault("additionalProperties", False)
+        return normalized
+
+    return normalize(schema)
+
+
 class ExternalAISegmentScorer:
     def __init__(self, endpoint_url: str | None, bearer_token: str | None = None, timeout_seconds: int = 45) -> None:
         self.endpoint_url = endpoint_url
@@ -357,7 +372,7 @@ class OpenAIHybridScorer(BaseLLMHybridScorer):
                     "name": schema_name,
                     "description": schema_description,
                     "strict": True,
-                    "schema": schema,
+                    "schema": _strict_json_schema(schema),
                 }
             },
             "max_output_tokens": max_output_tokens,
