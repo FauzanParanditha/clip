@@ -6,7 +6,7 @@ Stack compose di repo ini sekarang mem-pin `n8n` ke `2.13.3`, yaitu `stable` ter
 
 ## Arsitektur
 
-- `n8n` menerima `source_url`, menjalankan step ingest/transcript/rank/select, lalu fan-out render per clip.
+- `n8n` menerima `source_url`, membuat job, memulai ingest/transcript secara async, melakukan polling status job, lalu fan-out render per clip.
 - `clip-api` menyediakan endpoint HTTP untuk job lifecycle dan manifest.
 - `clip-worker` memproses queue Redis per clip, sehingga satu render gagal tidak mematikan seluruh job.
 - `Redis` menyimpan queue render.
@@ -36,8 +36,9 @@ Stack compose di repo ini sekarang mem-pin `n8n` ke `2.13.3`, yaitu `stable` ter
 Catatan operasional:
 
 - Step ingest dan transcript bisa memakan waktu lama untuk video panjang, terutama bila `faster-whisper` berjalan di CPU.
-- Workflow bawaan sekarang menaikkan timeout node HTTP berat menjadi `1800000ms` agar tidak cepat putus di n8n.
-- Backend juga menyediakan endpoint async `POST /v1/jobs/{job_id}/ingest/start` dan `POST /v1/jobs/{job_id}/transcript/start` jika Anda ingin mengubah workflow ke pola start lalu poll `GET /v1/jobs/{job_id}`.
+- Webhook sekarang merespons cepat setelah job dibuat dan ingest dimulai. Polling ingest/transcript berjalan di belakang layar sampai workflow siap lanjut.
+- Workflow bawaan sekarang memakai pola `start + poll`, bukan satu request HTTP panjang untuk ingest/transcript.
+- Backend menyediakan endpoint async `POST /v1/jobs/{job_id}/ingest/start` dan `POST /v1/jobs/{job_id}/transcript/start`, lalu workflow memeriksa `GET /v1/jobs/{job_id}` sampai status siap lanjut.
 
 ## Kontrak AI scorer eksternal
 

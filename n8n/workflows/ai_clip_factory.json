@@ -5,7 +5,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "ai-clip-factory",
-        "responseMode": "lastNode",
+        "responseMode": "responseNode",
         "options": {}
       },
       "id": "Webhook",
@@ -13,7 +13,7 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        -1120,
+        -1340,
         260
       ],
       "webhookId": "ai-clip-factory"
@@ -29,7 +29,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -900,
+        -1120,
         260
       ]
     },
@@ -47,22 +47,34 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -680,
+        -900,
         260
       ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "=http://clip-api:8000/v1/jobs/{{$json[\"job_id\"]}}/ingest",
-        "options": {
-          "timeout": 1800000
-        }
+        "url": "=http://clip-api:8000/v1/jobs/{{$json[\"job_id\"]}}/ingest/start",
+        "options": {}
       },
-      "id": "Ingest",
-      "name": "Ingest Source",
+      "id": "StartIngest",
+      "name": "Start Ingest",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
+      "position": [
+        -680,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {}
+      },
+      "id": "RespondAccepted",
+      "name": "Respond Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
       "position": [
         -460,
         260
@@ -70,19 +82,173 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "=http://clip-api:8000/v1/jobs/{{$json[\"job_id\"]}}/transcript",
-        "options": {
-          "timeout": 1800000
-        }
+        "amount": 15,
+        "unit": "seconds"
       },
-      "id": "Transcript",
-      "name": "Generate Transcript",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "id": "WaitIngest",
+      "name": "Wait Ingest Poll",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
       "position": [
         -240,
         260
+      ],
+      "webhookId": "84b7cb7b-f33d-44a9-88ff-5d47763e2201"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://clip-api:8000/v1/jobs/{{$json[\"job_id\"]}}",
+        "options": {}
+      },
+      "id": "PollIngest",
+      "name": "Poll Ingest Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -20,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const job = items[0]?.json ?? {};\nif (job.status === 'failed') {\n  throw new Error(job.last_error ?? 'Ingest failed');\n}\nreturn items;"
+      },
+      "id": "GuardIngestFailure",
+      "name": "Guard Ingest Failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ingest-complete-condition",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "ingested",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "IsIngestComplete",
+      "name": "Is Ingest Complete",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        420,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://clip-api:8000/v1/jobs/{{$json[\"job_id\"]}}/transcript/start",
+        "options": {}
+      },
+      "id": "StartTranscript",
+      "name": "Start Transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        650,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "WaitTranscript",
+      "name": "Wait Transcript Poll",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        180
+      ],
+      "webhookId": "4c60407a-bd8e-4108-9552-ac41533e2621"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://clip-api:8000/v1/jobs/{{$json[\"job_id\"]}}",
+        "options": {}
+      },
+      "id": "PollTranscript",
+      "name": "Poll Transcript Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1110,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const job = items[0]?.json ?? {};\nif (job.status === 'failed') {\n  throw new Error(job.last_error ?? 'Transcript failed');\n}\nreturn items;"
+      },
+      "id": "GuardTranscriptFailure",
+      "name": "Guard Transcript Failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "transcript-complete-condition",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "transcribed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "IsTranscriptComplete",
+      "name": "Is Transcript Complete",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1570,
+        180
       ]
     },
     {
@@ -96,8 +262,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -20,
-        260
+        1800,
+        100
       ]
     },
     {
@@ -111,8 +277,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        200,
-        260
+        2020,
+        100
       ]
     },
     {
@@ -126,8 +292,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        420,
-        260
+        2240,
+        100
       ]
     },
     {
@@ -141,8 +307,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        650,
-        260
+        2470,
+        100
       ]
     },
     {
@@ -156,8 +322,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        880,
-        260
+        2700,
+        100
       ]
     },
     {
@@ -171,8 +337,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1110,
-        260
+        2930,
+        100
       ]
     }
   ],
@@ -203,29 +369,142 @@
       "main": [
         [
           {
-            "node": "Ingest Source",
+            "node": "Start Ingest",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Ingest Source": {
+    "Start Ingest": {
       "main": [
         [
           {
-            "node": "Generate Transcript",
+            "node": "Respond Accepted",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Generate Transcript": {
+    "Respond Accepted": {
+      "main": [
+        [
+          {
+            "node": "Wait Ingest Poll",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Ingest Poll": {
+      "main": [
+        [
+          {
+            "node": "Poll Ingest Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Ingest Status": {
+      "main": [
+        [
+          {
+            "node": "Guard Ingest Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard Ingest Failure": {
+      "main": [
+        [
+          {
+            "node": "Is Ingest Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Ingest Complete": {
+      "main": [
+        [
+          {
+            "node": "Start Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait Ingest Poll",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Transcript": {
+      "main": [
+        [
+          {
+            "node": "Wait Transcript Poll",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Transcript Poll": {
+      "main": [
+        [
+          {
+            "node": "Poll Transcript Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Transcript Status": {
+      "main": [
+        [
+          {
+            "node": "Guard Transcript Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard Transcript Failure": {
+      "main": [
+        [
+          {
+            "node": "Is Transcript Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Transcript Complete": {
       "main": [
         [
           {
             "node": "Rank Segments",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait Transcript Poll",
             "type": "main",
             "index": 0
           }
@@ -294,7 +573,7 @@
   },
   "staticData": null,
   "tags": [],
-  "versionId": "3fd57733-03cb-4ccd-b6bc-clipfactory",
+  "versionId": "3fd57733-03cb-4ccd-b6bc-clipfactory-asyncpoll",
   "triggerCount": 0,
-  "updatedAt": "2026-03-26T00:00:00.000Z"
+  "updatedAt": "2026-03-30T00:00:00.000Z"
 }
