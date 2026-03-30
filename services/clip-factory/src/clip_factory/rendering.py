@@ -39,16 +39,32 @@ def build_vertical_crop_filter(focus_ratio: float | None = None) -> str:
     return f"crop='{crop_w}':'{crop_h}':'{crop_x}':'{crop_y}'"
 
 
+def build_contain_pad_filter() -> str:
+    return ",".join(
+        [
+            "scale=1080:1920:force_original_aspect_ratio=decrease",
+            "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=0x101010",
+        ]
+    )
+
+
 def build_filter_chain(render_request: RenderRequest) -> str:
     focus_ratio = estimate_focus_ratio(render_request.tracking_boxes)
-    crop = build_vertical_crop_filter(focus_ratio)
     subtitle_filter = f"subtitles='{escape_filter_path(Path(render_request.subtitle_path))}'"
+    if render_request.crop_mode == "contain":
+        framing = build_contain_pad_filter()
+    else:
+        framing = ",".join(
+            [
+                build_vertical_crop_filter(focus_ratio),
+                "scale=1188:2112",
+                "crop=1080:1920:(iw-ow)/2:(ih-oh)/2",
+            ]
+        )
     return ",".join(
         [
             "fps=30",
-            crop,
-            "scale=1188:2112",
-            "crop=1080:1920:(iw-ow)/2:(ih-oh)/2",
+            framing,
             "eq=contrast=1.03:saturation=1.08",
             subtitle_filter,
         ]
@@ -92,4 +108,3 @@ def render_clip(settings: Settings, render_request: RenderRequest) -> list[str]:
     command = build_ffmpeg_command(settings, render_request)
     subprocess.run(command, check=True, capture_output=True, text=True)
     return command
-

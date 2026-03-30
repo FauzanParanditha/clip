@@ -53,7 +53,24 @@ class RenderingTests(unittest.TestCase):
         self.assertIn("subtitles=", filter_chain)
         self.assertIn("iw*0.", filter_chain)
 
+    def test_build_filter_chain_uses_contain_pad_when_requested(self) -> None:
+        request = RenderRequest(
+            job_id="job_test",
+            clip_id="clip_test",
+            input_video_path="/tmp/source.mp4",
+            output_path="/tmp/output.mp4",
+            subtitle_path="/tmp/clip_test.ass",
+            start_ms=0,
+            end_ms=30_000,
+            hook_text="Hook",
+            keywords=["economy"],
+            crop_mode="contain",
+        )
+        filter_chain = build_filter_chain(request)
+        self.assertIn("force_original_aspect_ratio=decrease", filter_chain)
+        self.assertIn("pad=1080:1920", filter_chain)
+        self.assertNotIn("crop='if(gte(iw/ih,9/16)", filter_chain)
+
 
 if __name__ == "__main__":
     unittest.main()
-

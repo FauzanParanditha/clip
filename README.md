@@ -83,6 +83,33 @@ Respons yang diharapkan:
 
 Jika endpoint AI tidak diisi atau gagal, pipeline otomatis fallback ke heuristic ranker lokal.
 
+## Hybrid AI Scoring Bawaan
+
+Repo ini sekarang mendukung mode hybrid bawaan:
+
+- heuristic lokal tetap membangun kandidat segmen awal secara cepat
+- jika `CLIP_FACTORY_OPENAI_API_KEY` diisi, OpenAI dipakai untuk:
+  - re-score kandidat segmen terbaik
+  - rewrite `hook_text`, `reason`, dan `keywords`
+  - rewrite metadata clip terpilih (`titles`, `caption`, `hashtags`, `highlight_keywords`)
+- skor final kandidat adalah blend antara heuristic lokal dan skor LLM, jadi pipeline tetap stabil walau model sesekali gagal atau memberi jawaban aneh
+
+Env yang dipakai:
+
+```env
+CLIP_FACTORY_OPENAI_API_KEY=
+CLIP_FACTORY_OPENAI_MODEL=gpt-5-mini
+CLIP_FACTORY_OPENAI_BASE_URL=https://api.openai.com/v1/responses
+CLIP_FACTORY_OPENAI_TIMEOUT_SECONDS=60
+CLIP_FACTORY_OPENAI_REASONING_EFFORT=
+```
+
+Jika `CLIP_FACTORY_AI_SCORER_URL` dan `CLIP_FACTORY_OPENAI_API_KEY` sama-sama diisi, alurnya menjadi:
+
+1. heuristic lokal membuat kandidat
+2. external scorer opsional memperkaya skor kandidat
+3. OpenAI melakukan re-score akhir dan rewrite metadata clip
+
 ## Deploy ke Self-Hosted n8n
 
 Jika Anda sudah punya `n8n` di VPS/domain sendiri, gunakan [`docker-compose.server.yml`](/Users/pandi-fauzan/PANDI-Fauzan/Fauzan/N8N/Clipper/docker-compose.server.yml) dan [`.env.server.example`](/Users/pandi-fauzan/PANDI-Fauzan/Fauzan/N8N/Clipper/.env.server.example) sebagai basis.
@@ -113,6 +140,7 @@ Pada mode ini:
 ## Keterbatasan V1
 
 - Auto-reframe memakai subject tracking jika `opencv-python-headless` tersedia di image; fallback default adalah center crop.
+- Auto-reframe memakai subject tracking jika tersedia. Jika tracking tidak ada atau tidak layak dipakai, render fallback ke mode `contain + pad` agar frame penuh tetap terlihat dan tidak ter-crop agresif.
 - Transkripsi default memakai `faster-whisper` jika dependency dipasang. Tanpa engine ASR, Anda masih bisa menguji pipeline dengan meletakkan transcript sidecar JSON di folder job.
 - Default transkripsi memakai model `small` pada `cpu` dengan `int8`. Untuk percepatan test di server CPU, Anda bisa menurunkan `CLIP_FACTORY_WHISPER_MODEL` ke `base` atau `tiny` di env.
 - Auto-post ke YouTube/TikTok belum diaktifkan. V1 berhenti di aset siap upload.

@@ -4,12 +4,13 @@ import csv
 import json
 import uuid
 from pathlib import Path
+from typing import cast
 
 import redis
 
-from .ai import ExternalAISegmentScorer
+from .ai import HybridAISegmentScorer
 from .config import Settings
-from .contracts import ClipState, IntakeRequest, JobState, RenderRequest, utc_now
+from .contracts import ClipMetadata, ClipState, IntakeRequest, JobState, RenderRequest, SegmentCandidate, utc_now
 from .heuristics import build_candidate_segments, generate_clip_metadata, select_segments, slice_words
 from .ingest import run_ingest
 from .rendering import render_clip
@@ -24,7 +25,7 @@ class ClipPipeline:
         self.settings = settings
         self.store = store
         self.redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
-        self.ai_scorer = ExternalAISegmentScorer(settings.ai_scorer_url, settings.ai_scorer_bearer_token)
+        self.ai_scorer = HybridAISegmentScorer(settings)
 
     def create_job(self, intake: IntakeRequest) -> JobState:
         job_id = f"job_{uuid.uuid4().hex[:10]}"
@@ -101,17 +102,24 @@ class ClipPipeline:
 
         job.review_needed = review_needed
         job.selected_clip_ids = []
+        fallback_by_clip_id: dict[str, tuple[SegmentCandidate, ClipMetadata]] = {}
+        clip_rows: list[tuple[str, SegmentCandidate]] = []
         for index, segment in enumerate(selected, start=1):
             clip_id = f"clip_{index:02d}_{segment.segment_id[-6:]}"
+            fallback_by_clip_id[clip_id] = (segment, generate_clip_metadata(segment, job.source))
+            clip_rows.append((clip_id, segment))
+            job.selected_clip_ids.append(clip_id)
+
+        metadata_by_clip_id = self.ai_scorer.enrich_clip_metadata(job, job.source, fallback_by_clip_id)
+        for clip_id, segment in clip_rows:
             clip = ClipState(
                 clip_id=clip_id,
                 job_id=job.job_id,
                 segment=segment,
-                metadata=generate_clip_metadata(segment, job.source),
+                metadata=cast(ClipMetadata, metadata_by_clip_id.get(clip_id, fallback_by_clip_id[clip_id][1])),
                 status="pending",
             )
             self.store.save_clip(clip)
-            job.selected_clip_ids.append(clip_id)
 
         self._update_job(job, status="render_pending", error=None)
         self.build_manifest(job_id)
@@ -176,6 +184,7 @@ class ClipPipeline:
                 end_ms=clip.segment.end_ms,
                 hook_text=clip.segment.hook_text,
                 keywords=(clip.metadata.highlight_keywords if clip.metadata else clip.segment.keywords),
+                crop_mode="auto_reframe" if tracking_boxes else "contain",
                 tracking_boxes=tracking_boxes,
             )
             command = render_clip(self.settings, render_request)

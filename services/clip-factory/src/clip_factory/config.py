@@ -13,6 +13,11 @@ class Settings:
     queue_key: str
     ai_scorer_url: str | None
     ai_scorer_bearer_token: str | None
+    openai_api_key: str | None
+    openai_model: str
+    openai_base_url: str
+    openai_timeout_seconds: int
+    openai_reasoning_effort: str | None
     fallback_clip_count: int
     whisper_model: str
     whisper_device: str
@@ -34,6 +39,11 @@ class Settings:
             queue_key=os.getenv("CLIP_FACTORY_QUEUE_KEY", "clip-factory:render"),
             ai_scorer_url=os.getenv("CLIP_FACTORY_AI_SCORER_URL") or None,
             ai_scorer_bearer_token=os.getenv("CLIP_FACTORY_AI_SCORER_BEARER_TOKEN") or None,
+            openai_api_key=os.getenv("CLIP_FACTORY_OPENAI_API_KEY") or None,
+            openai_model=os.getenv("CLIP_FACTORY_OPENAI_MODEL", "gpt-5-mini"),
+            openai_base_url=os.getenv("CLIP_FACTORY_OPENAI_BASE_URL", "https://api.openai.com/v1/responses"),
+            openai_timeout_seconds=max(5, int(os.getenv("CLIP_FACTORY_OPENAI_TIMEOUT_SECONDS", "60"))),
+            openai_reasoning_effort=os.getenv("CLIP_FACTORY_OPENAI_REASONING_EFFORT") or None,
             fallback_clip_count=max(5, min(12, int(os.getenv("CLIP_FACTORY_FALLBACK_CLIP_COUNT", "8")))),
             whisper_model=os.getenv("CLIP_FACTORY_WHISPER_MODEL", "small"),
             whisper_device=os.getenv("CLIP_FACTORY_WHISPER_DEVICE", "cpu"),
@@ -42,4 +52,3 @@ class Settings:
             ytdlp_binary=os.getenv("CLIP_FACTORY_YTDLP_BINARY", "yt-dlp"),
             subtitle_font=os.getenv("CLIP_FACTORY_SUBTITLE_FONT", "Arial"),
         )
-
