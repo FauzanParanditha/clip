@@ -158,7 +158,12 @@ class ClipPipeline:
             )
             subtitle_path.write_text(subtitle_text, encoding="utf-8")
 
-            tracking_boxes = detect_subject_tracking(job.source.video_path, clip.segment.start_ms, clip.segment.end_ms)
+            tracking_boxes = detect_subject_tracking(
+                job.source.video_path,
+                clip.segment.start_ms,
+                clip.segment.end_ms,
+                metadata_path=job.source.metadata_path,
+            )
             output_dir = self.settings.output_dir / job_id
             output_path = output_dir / f"{clip_id}.mp4"
             render_request = RenderRequest(
@@ -306,4 +311,3 @@ class ClipPipeline:
         job.last_error = error
         job.updated_at = utc_now()
         self.store.save_job(job)
-

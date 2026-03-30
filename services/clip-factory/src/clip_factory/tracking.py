@@ -1,11 +1,57 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from .contracts import TrackingBox
 
 
-def detect_subject_tracking(video_path: str, start_ms: int, end_ms: int, sample_step_ms: int = 1200) -> list[TrackingBox]:
+def source_uses_av1(metadata_path: str | None) -> bool:
+    if not metadata_path:
+        return False
+
+    path = Path(metadata_path)
+    if not path.exists():
+        return False
+
+    try:
+        metadata = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+
+    codecs: list[str] = []
+    for key in ("vcodec",):
+        value = metadata.get(key)
+        if isinstance(value, str):
+            codecs.append(value)
+
+    for collection_key in ("requested_formats", "requested_downloads", "formats"):
+        collection = metadata.get(collection_key)
+        if not isinstance(collection, list):
+            continue
+        for item in collection:
+            if not isinstance(item, dict):
+                continue
+            value = item.get("vcodec")
+            if isinstance(value, str):
+                codecs.append(value)
+
+    normalized = " ".join(codecs).lower()
+    return "av01" in normalized or normalized.strip() == "av1" or " av1" in normalized
+
+
+def detect_subject_tracking(
+    video_path: str,
+    start_ms: int,
+    end_ms: int,
+    sample_step_ms: int = 1200,
+    metadata_path: str | None = None,
+) -> list[TrackingBox]:
+    # OpenCV emits repeated AV1 decode warnings on CPU-only hosts. In that case,
+    # fall back to center crop and skip tracking entirely.
+    if source_uses_av1(metadata_path):
+        return []
+
     try:
         import cv2  # type: ignore
     except ImportError:
@@ -47,4 +93,3 @@ def detect_subject_tracking(video_path: str, start_ms: int, end_ms: int, sample_
 
     capture.release()
     return detections
-
