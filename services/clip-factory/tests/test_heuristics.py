@@ -59,6 +59,101 @@ class HeuristicsTests(unittest.TestCase):
         self.assertGreater(candidates[0].score, 0)
         self.assertLess(candidates[0].start_ms, candidates[0].end_ms)
 
+    def test_news_score_prefers_title_aligned_clip_over_side_angle_reaction(self) -> None:
+        title = "Trump accused of secret plan for Iran ground invasion as thousands of US Marines arrive"
+        headline_score, _, _ = score_segment(
+            (
+                "Thousands of US Marines have arrived as reports say Trump could approve "
+                "ground operations in Iran within days."
+            ),
+            duration_ms=36_000,
+            confidence=0.92,
+            start_ms=90_000,
+            total_duration_ms=900_000,
+            content_type="news",
+            source_title=title,
+        )
+        side_angle_score, _, flags = score_segment(
+            "A local congregation says Iran is a threat and public opinion may change over time.",
+            duration_ms=36_000,
+            confidence=0.92,
+            start_ms=760_000,
+            total_duration_ms=900_000,
+            content_type="news",
+            source_title=title,
+        )
+        self.assertGreater(headline_score, side_angle_score)
+        self.assertIn("side_angle", flags)
+
+    def test_news_selection_avoids_duplicate_headline_facets(self) -> None:
+        candidates = [
+            SegmentCandidate(
+                "a",
+                0,
+                30_000,
+                88.0,
+                "headline aligned",
+                "Clip A",
+                ["darurat", "energi", "apbn", "kuat"],
+                0.9,
+                "A",
+            ),
+            SegmentCandidate(
+                "b",
+                40_000,
+                70_000,
+                86.0,
+                "headline aligned",
+                "Clip B",
+                ["energi", "apbn", "terkendali", "risiko"],
+                0.9,
+                "B",
+            ),
+            SegmentCandidate(
+                "c",
+                80_000,
+                110_000,
+                83.0,
+                "headline aligned",
+                "Clip C",
+                ["pajak", "solusi", "ekonomi", "komprehensif"],
+                0.9,
+                "C",
+            ),
+            SegmentCandidate(
+                "d",
+                120_000,
+                150_000,
+                81.0,
+                "headline aligned",
+                "Clip D",
+                ["kritik", "kredibilitas", "pengkritik", "kebijakan"],
+                0.9,
+                "D",
+            ),
+            SegmentCandidate(
+                "e",
+                160_000,
+                190_000,
+                80.0,
+                "headline aligned",
+                "Clip E",
+                ["subsidi", "pasokan", "cadangan", "energi"],
+                0.9,
+                "E",
+            ),
+        ]
+        selected, _ = select_segments(
+            candidates,
+            requested_count=5,
+            transcript_confidence=0.9,
+            content_type="news",
+            source_title="Menkeu Purbaya Pastikan RI Belum Darurat Energi: APBN Kita Kuat",
+        )
+        selected_ids = {segment.segment_id for segment in selected}
+        self.assertIn("a", selected_ids)
+        self.assertNotIn("b", selected_ids)
+
     def test_select_segments_avoids_overlap(self) -> None:
         candidates = [
             SegmentCandidate("a", 0, 30_000, 84.0, "strong opener", "Clip A", ["economy", "rates"], 0.9, "A"),
@@ -76,4 +171,3 @@ class HeuristicsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

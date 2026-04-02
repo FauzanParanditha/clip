@@ -75,7 +75,12 @@ class ClipPipeline:
             raise RuntimeError("Job source metadata missing")
         self._update_job(job, status="ranking", error=None)
         try:
-            candidates = build_candidate_segments(transcript, job.input.normalized_clip_count())
+            candidates = build_candidate_segments(
+                transcript,
+                job.input.normalized_clip_count(),
+                content_type=job.input.content_type,
+                source_title=job.source.title,
+            )
             candidates = self.ai_scorer.enrich_candidates(job, job.source, candidates)
             job.candidate_segments = candidates[: max(24, job.input.normalized_clip_count() * 4)]
             self._update_job(job, status="ranked", error=None)
@@ -95,6 +100,8 @@ class ClipPipeline:
             job.candidate_segments,
             requested_count=job.input.normalized_clip_count(),
             transcript_confidence=transcript_confidence,
+            content_type=job.input.content_type,
+            source_title=job.source.title,
         )
         if not selected:
             self._update_job(job, status="failed", error="No viable clip segments were selected")

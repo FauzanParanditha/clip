@@ -74,8 +74,9 @@ def _language_instruction(job: JobState, source: SourceAsset) -> str:
 def _news_candidate_instruction() -> str:
     return (
         "For news clips, strongly prefer segments that surface the headline, what changed, who said it, why it matters now, and the immediate consequence. "
+        "The top 1-2 clips should directly answer or restate the source title/headline with the same core entities, action, and consequence whenever the transcript supports it. "
         "Prefer crisp escalation, clear cause-and-effect, and standalone context within the first sentence. "
-        "Penalize analysis-heavy tangents, niche tactical detail without payoff, and segments that require too much prior context. "
+        "Penalize analysis-heavy tangents, public reaction side-stories, niche tactical detail without payoff, and segments that require too much prior context. "
         "Do not sensationalize or invent implications beyond what the source supports."
     )
 
@@ -84,6 +85,7 @@ def _news_metadata_instruction() -> str:
     return (
         "For news clips, write titles and hook text like sharp, accurate news headlines. "
         "Lead with the update, escalation, or consequence. "
+        "Keep the source title/headline angle intact; do not drift into side reactions or secondary context unless that is the main point of the selected clip. "
         "Keep captions concise and factual: what happened, what changed, and why it matters now. "
         "Avoid creator-style filler, vague curiosity bait, or hype that is not grounded in the source."
     )

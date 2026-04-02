@@ -278,6 +278,7 @@ class OpenAIHybridScorerTests(unittest.TestCase, SharedLLMHybridScorerAssertions
 
         scorer.enrich_candidates(job, source, candidates)
         self.assertIn("For news clips, strongly prefer segments that surface the headline", scorer.calls[0]["developer_prompt"])
+        self.assertIn("The top 1-2 clips should directly answer or restate the source title/headline", scorer.calls[0]["developer_prompt"])
 
 
 class GeminiHybridScorerTests(unittest.TestCase, SharedLLMHybridScorerAssertions):

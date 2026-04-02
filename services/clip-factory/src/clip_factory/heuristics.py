@@ -63,6 +63,56 @@ INTRO_WORDS = {"welcome", "today", "episode", "podcast", "before", "start", "joi
 OUTRO_WORDS = {"subscribe", "watching", "next time", "like and subscribe", "thanks for watching"}
 SPONSOR_WORDS = {"sponsor", "sponsored", "promo", "discount", "code", "partnered"}
 FILLER_WORDS = {"basically", "literally", "actually", "kind of", "sort of", "you know", "i mean"}
+NEWS_TITLE_STOPWORDS = STOPWORDS | {
+    "after",
+    "amid",
+    "announces",
+    "announcement",
+    "bbc",
+    "breaking",
+    "channel",
+    "exclusive",
+    "headline",
+    "inews",
+    "latest",
+    "new",
+    "news",
+    "official",
+    "officials",
+    "report",
+    "reported",
+    "reports",
+    "says",
+    "said",
+    "ten",
+    "terkini",
+    "today",
+    "tonight",
+    "update",
+}
+NEWS_SIDE_ANGLE_WORDS = {
+    "audience",
+    "believer",
+    "believers",
+    "community",
+    "congregation",
+    "critic",
+    "critics",
+    "opinion",
+    "people",
+    "public",
+    "reaction",
+    "reactions",
+    "resident",
+    "residents",
+    "sentiment",
+    "supporter",
+    "supporters",
+    "viewer",
+    "viewers",
+    "voter",
+    "voters",
+}
 
 
 @dataclass(slots=True)
@@ -153,12 +203,61 @@ def extract_keywords(text: str, limit: int = 6) -> list[str]:
     return [token for token, _ in counts.most_common(limit)]
 
 
+def _headline_tokens(text: str) -> list[str]:
+    return [
+        token
+        for token in _content_tokens(text)
+        if len(token) > 2 and token not in NEWS_TITLE_STOPWORDS
+    ]
+
+
+def _headline_phrases(text: str) -> set[str]:
+    tokens = _headline_tokens(text)
+    phrases: set[str] = set()
+    for size in (2, 3):
+        for index in range(len(tokens) - size + 1):
+            phrase = " ".join(tokens[index : index + size])
+            if len(phrase.replace(" ", "")) >= 8:
+                phrases.add(phrase)
+    return phrases
+
+
+def _news_alignment_metrics(text: str, source_title: str) -> tuple[int, float, int, int, float]:
+    title_tokens = _headline_tokens(source_title)
+    if not title_tokens:
+        return 0, 0.0, 0, 0, 0.0
+
+    candidate_tokens = _content_tokens(text)
+    if not candidate_tokens:
+        return 0, 0.0, 0, 0, 0.0
+
+    title_set = set(title_tokens)
+    candidate_set = set(candidate_tokens)
+    overlap_count = len(title_set & candidate_set)
+    overlap_ratio = overlap_count / len(title_set)
+    opener_overlap = len(title_set & set(candidate_tokens[:14]))
+    phrase_hits = sum(1 for phrase in _headline_phrases(source_title) if phrase in text.lower())
+    anchor_overlap = min(
+        1.0,
+        (overlap_count / max(2.0, min(6.0, len(title_set))))
+        + min(0.45, opener_overlap * 0.12)
+        + min(0.45, phrase_hits * 0.22),
+    )
+    return overlap_count, overlap_ratio, opener_overlap, phrase_hits, anchor_overlap
+
+
 def _penalty_hits(text: str, phrases: Iterable[str]) -> int:
     lower = text.lower()
     return sum(1 for phrase in phrases if phrase in lower)
 
 
-def build_candidate_segments(transcript: TranscriptDocument, target_count: int = 8) -> list[SegmentCandidate]:
+def build_candidate_segments(
+    transcript: TranscriptDocument,
+    target_count: int = 8,
+    *,
+    content_type: str = "podcast",
+    source_title: str = "",
+) -> list[SegmentCandidate]:
     sentences = split_sentences(transcript.words)
     candidates: list[SegmentCandidate] = []
     min_duration = 20_000
@@ -179,7 +278,15 @@ def build_candidate_segments(transcript: TranscriptDocument, target_count: int =
 
             text = " ".join(word.text for word in window_words).strip()
             confidence = sum(word.confidence for word in window_words) / max(1, len(window_words))
-            score, reason, flags = score_segment(text, duration, confidence, start_ms, transcript.words[-1].end_ms)
+            score, reason, flags = score_segment(
+                text,
+                duration,
+                confidence,
+                start_ms,
+                transcript.words[-1].end_ms,
+                content_type=content_type,
+                source_title=source_title,
+            )
             hook_text = extract_hook_text(text)
             candidate = SegmentCandidate(
                 segment_id=f"seg_{hashlib.sha1(f'{start_ms}:{end_ms}'.encode('utf-8')).hexdigest()[:10]}",
@@ -215,7 +322,16 @@ def extract_hook_text(text: str, limit: int = 90) -> str:
     return cut or sanitized[:limit].strip()
 
 
-def score_segment(text: str, duration_ms: int, confidence: float, start_ms: int, total_duration_ms: int) -> tuple[float, str, list[str]]:
+def score_segment(
+    text: str,
+    duration_ms: int,
+    confidence: float,
+    start_ms: int,
+    total_duration_ms: int,
+    *,
+    content_type: str = "podcast",
+    source_title: str = "",
+) -> tuple[float, str, list[str]]:
     lower = text.lower()
     content_tokens = _content_tokens(text)
     token_count = len(content_tokens)
@@ -235,6 +351,12 @@ def score_segment(text: str, duration_ms: int, confidence: float, start_ms: int,
     quote_density = min(1.0, (punctuation_burst * 0.12) + (0.08 if '"' in text else 0.0))
     speaker_energy = min(1.0, 0.25 + punctuation_burst * 0.18 + numeric_density * 0.05)
     confidence_score = min(1.0, max(0.0, confidence))
+    news_headline_alignment = 0.0
+    news_alignment_penalty = 0.0
+    news_side_angle_penalty = 0.0
+    news_side_angle_hits = 0
+    headline_overlap_count = 0
+    headline_phrase_hits = 0
 
     weighted = (
         duration_score * 0.16
@@ -247,11 +369,37 @@ def score_segment(text: str, duration_ms: int, confidence: float, start_ms: int,
         + confidence_score * 0.05
     )
 
-    total_penalty = sponsor_penalty * 0.18 + filler_penalty * 0.05 + intro_penalty * 0.10 + outro_penalty * 0.12
+    if content_type == "news" and source_title:
+        headline_overlap_count, headline_overlap_ratio, opener_overlap, headline_phrase_hits, news_headline_alignment = (
+            _news_alignment_metrics(text, source_title)
+        )
+        news_side_angle_hits = _penalty_hits(lower, NEWS_SIDE_ANGLE_WORDS)
+        weighted += news_headline_alignment * 0.24
+        if start_ms <= int(total_duration_ms * 0.38) and headline_overlap_count >= 2:
+            weighted += 0.05
+        if headline_overlap_count == 0:
+            news_alignment_penalty += 0.16
+        elif headline_overlap_ratio < 0.18 and headline_phrase_hits == 0:
+            news_alignment_penalty += 0.08
+        if news_side_angle_hits and headline_overlap_count < 2:
+            news_side_angle_penalty += 0.08 * min(news_side_angle_hits, 2)
+        if start_ms >= int(total_duration_ms * 0.7) and headline_overlap_count < 2 and news_side_angle_hits:
+            news_side_angle_penalty += 0.05
+
+    total_penalty = (
+        sponsor_penalty * 0.18
+        + filler_penalty * 0.05
+        + intro_penalty * 0.10
+        + outro_penalty * 0.12
+        + news_alignment_penalty
+        + news_side_angle_penalty
+    )
     raw_score = max(0.0, min(1.0, weighted - total_penalty))
     score = raw_score * 100
 
     positive_signals = []
+    if content_type == "news" and (headline_overlap_count >= 2 or headline_phrase_hits):
+        positive_signals.append("headline aligned")
     if hook_hits:
         positive_signals.append("strong opener")
     if info_density > 0.72:
@@ -280,6 +428,12 @@ def score_segment(text: str, duration_ms: int, confidence: float, start_ms: int,
     if confidence < 0.72:
         penalties.append("low transcript confidence")
         flags.append("low_confidence")
+    if content_type == "news" and news_alignment_penalty >= 0.08:
+        penalties.append("weak headline alignment")
+        flags.append("headline_miss")
+    if content_type == "news" and news_side_angle_penalty >= 0.08:
+        penalties.append("side-angle tangent")
+        flags.append("side_angle")
 
     reason = ", ".join(positive_signals[:2])
     if penalties:
@@ -287,19 +441,44 @@ def score_segment(text: str, duration_ms: int, confidence: float, start_ms: int,
     return score, reason, flags
 
 
-def select_segments(candidates: list[SegmentCandidate], requested_count: int, transcript_confidence: float) -> tuple[list[SegmentCandidate], bool]:
+def _news_headline_signature(candidate: SegmentCandidate, source_title: str) -> frozenset[str]:
+    title_tokens = set(_headline_tokens(source_title))
+    if not title_tokens:
+        return frozenset()
+    signature = {token for token in candidate.keywords if token in title_tokens}
+    if len(signature) < 2:
+        return frozenset()
+    return frozenset(signature)
+
+
+def select_segments(
+    candidates: list[SegmentCandidate],
+    requested_count: int,
+    transcript_confidence: float,
+    *,
+    content_type: str = "podcast",
+    source_title: str = "",
+) -> tuple[list[SegmentCandidate], bool]:
     target = max(5, min(12, requested_count))
     review_needed = transcript_confidence < 0.76
     if review_needed:
         target = max(3, target - 2)
 
     selected: list[SegmentCandidate] = []
+    news_signature_cache: list[frozenset[str]] = []
+    similarity_threshold = 0.5 if content_type == "news" else 0.66
     for candidate in sorted(candidates, key=lambda item: item.score, reverse=True):
         if any(overlaps(candidate, existing) for existing in selected):
             continue
-        if any(keyword_similarity(candidate, existing) > 0.66 for existing in selected):
+        if any(keyword_similarity(candidate, existing) > similarity_threshold for existing in selected):
             continue
+        if content_type == "news" and source_title:
+            signature = _news_headline_signature(candidate, source_title)
+            if signature and any(signature <= existing or existing <= signature for existing in news_signature_cache if existing):
+                continue
         selected.append(candidate)
+        if content_type == "news" and source_title:
+            news_signature_cache.append(_news_headline_signature(candidate, source_title))
         if len(selected) >= target:
             break
 
@@ -311,7 +490,15 @@ def select_segments(candidates: list[SegmentCandidate], requested_count: int, tr
                 continue
             if any(abs(candidate.start_ms - existing.start_ms) < 12_000 for existing in selected):
                 continue
+            if any(keyword_similarity(candidate, existing) > similarity_threshold for existing in selected):
+                continue
+            if content_type == "news" and source_title:
+                signature = _news_headline_signature(candidate, source_title)
+                if signature and any(signature <= existing or existing <= signature for existing in news_signature_cache if existing):
+                    continue
             selected.append(candidate)
+            if content_type == "news" and source_title:
+                news_signature_cache.append(_news_headline_signature(candidate, source_title))
             if len(selected) >= min(5, target):
                 break
 
